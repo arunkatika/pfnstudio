@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ project_name }}{% endblock %} · PriorStudio</title>
+  <link rel="stylesheet" href="{{ '../' if false else '' }}static/style.css">
+</head>
+<body>
+  <header class="ps-header">
+    <a class="ps-brand" href="index.html"><strong>{{ project_name }}</strong> <span class="ps-tag">PriorStudio</span></a>
+    <nav>
+      <a href="roadmap.html">Roadmap</a>
+      <a href="initiatives.html">Initiatives</a>
+      <a href="priors.html">Priors</a>
+      <a href="models.html">Models</a>
+      <a href="evals.html">Evals</a>
+      <a href="runs.html">Runs</a>
+      <a href="literature.html">Literature</a>
+    </nav>
+  </header>
+  <main class="ps-main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="ps-footer">
+    <small>Rendered with priorstudio-studio. Source of truth: this project's git repo.</small>
+  </footer>
+</body>
+</html>

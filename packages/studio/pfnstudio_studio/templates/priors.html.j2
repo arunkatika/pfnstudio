@@ -1,0 +1,39 @@
+{% extends "_base.html.j2" %}
+{% block title %}Priors{% endblock %}
+{% block content %}
+<h1>Priors</h1>
+{% for p in priors %}
+  <section class="ps-card">
+    <h2>{{ p.name or p.id }} <span class="ps-pill">v{{ p.version }}</span> <span class="ps-pill">{{ p.kind }}</span></h2>
+    <p class="ps-muted">id: <code>{{ p.id }}</code></p>
+    <p>{{ p.description }}</p>
+    <h3>Parameters</h3>
+    <table class="ps-table">
+      <thead><tr><th>name</th><th>type</th><th>range / choices</th><th>description</th></tr></thead>
+      <tbody>
+      {% for pname, pspec in (p.parameters or {}).items() %}
+        <tr>
+          <td><code>{{ pname }}</code></td>
+          <td>{{ pspec.type }}</td>
+          <td>{{ pspec.range or pspec.choices or '' }}</td>
+          <td>{{ pspec.description or '' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <h3>Outputs</h3>
+    <ul>
+      {% for v in (p.outputs.variables or []) %}
+        <li><code>{{ v.name }}</code> — {{ v.type }}{% if v.shape %}, shape <code>{{ v.shape }}</code>{% endif %}{% if v.description %}: {{ v.description }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% if p._doc %}
+      <details><summary>Rationale</summary>
+        {{ p._doc | markdown | safe }}
+      </details>
+    {% endif %}
+  </section>
+{% else %}
+  <p class="ps-empty">No priors yet. Add one under <code>priors/&lt;id&gt;/</code>.</p>
+{% endfor %}
+{% endblock %}

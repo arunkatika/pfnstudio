@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pfnstudio"
+version = "0.7.0"
+description = "CLI for the PFN Studio framework — scaffold, validate, lint, and run prior-fitted foundation model projects."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "PFN Studio contributors" }]
+keywords = ["foundation-models", "pfn", "prior-fitted-networks", "causal-inference", "ml"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "typer>=0.12",
+  "rich>=13.7",
+  "pyyaml>=6.0",
+  "jsonschema>=4.21",
+  "requests>=2.31",
+  "pfnstudio-core>=0.4.0",
+]
+
+[project.optional-dependencies]
+torch = ["pfnstudio-core[torch]"]
+wandb = ["wandb>=0.16"]
+mlflow = ["mlflow>=2.10"]
+modal = ["modal>=0.62"]
+runpod = ["runpod>=1.6"]
+hf = ["huggingface_hub>=0.20"]
+studio = ["pfnstudio-studio>=0.4.0"]
+all = [
+  "pfnstudio-core[torch]",
+  "wandb>=0.16",
+  "mlflow>=2.10",
+  "modal>=0.62",
+  "runpod>=1.6",
+  "huggingface_hub>=0.20",
+  "pfnstudio-studio>=0.4.0",
+]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.4"]
+
+[project.scripts]
+pfnstudio = "pfnstudio.cli:app"
+
+[project.urls]
+Homepage = "https://pfnstudio.com"
+Repository = "https://github.com/profitopsai/pfnstudio"
+Issues = "https://github.com/profitopsai/pfnstudio/issues"
+Documentation = "https://github.com/profitopsai/pfnstudio/tree/main/docs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pfnstudio"]
+# _bundled/ is populated by scripts/sync-bundled.sh before build —
+# schemas/ and templates/ live at the repo root for development and
+# get copied in for packaging. The build no longer reaches outside
+# the package dir (which is rejected by `python -m build` isolation
+# and Python 3.13's stricter tarfile filter).
+artifacts = [
+  "pfnstudio/_bundled/**/*",
+]

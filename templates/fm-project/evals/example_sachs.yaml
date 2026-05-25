@@ -1,0 +1,37 @@
+id: example_sachs
+name: Sachs protein-signaling benchmark
+version: 0.1.0
+task: discovery
+description: |
+  Causal discovery on the Sachs et al. (2005) protein-signaling dataset.
+  Standard benchmark — 11 nodes, ~17 ground-truth edges depending on accepted
+  consensus graph.
+
+dataset:
+  name: sachs
+  source: https://www.science.org/doi/10.1126/science.1105809
+  version: "2005"
+  split: full
+
+metrics:
+  - name: shd
+    higher_is_better: false
+    description: Structural Hamming Distance to ground-truth DAG.
+  - name: f1
+    higher_is_better: true
+    description: F1 over edge presence.
+
+baselines:
+  - name: PC
+    score: 17
+    source: tsamardinos2019
+  - name: GES
+    score: 18
+    source: tsamardinos2019
+  - name: NOTEARS
+    score: 14
+    source: zheng2018notears
+
+citations:
+  - sachs2005causal
+  - zheng2018notears

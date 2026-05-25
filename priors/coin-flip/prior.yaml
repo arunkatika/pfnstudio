@@ -1,0 +1,39 @@
+id: coin_flip
+slug: coin-flip
+name: "Bayesian Coin Flip"
+version: 0.1.0
+kind: tabular
+description: "Textbook conjugate prior. The PFN learns to approximate the closed-form posterior mean (α + heads) / (α + β + N)."
+implementation: prior.py
+parameters:
+  num_flips:
+    type: int
+    range: [10, 200]
+    description: "Flips per task"
+  alpha:
+    type: float
+    default: 2.0
+    description: "Beta prior α"
+  beta:
+    type: float
+    default: 2.0
+    description: "Beta prior β"
+outputs:
+  variables:
+    - name: flips
+      type: tensor
+      shape: "(N, 1)"
+citations:
+  - mueller2022pfn
+
+marketplace:
+  tagline: "p ~ Beta(α, β); flips ~ Bernoulli(p)"
+  longSummary: "Direct evidence that the model has learned Bayesian inference end-to-end — compare the predicted bias to the analytical posterior on held-out flips."
+  category: probabilistic
+  tags:
+    - bayesian
+    - classroom
+    - closed-form
+  author:
+    name: "PFN Studio Team"
+    verified: true

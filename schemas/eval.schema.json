@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://priorstudio.dev/schemas/eval.schema.json",
+  "title": "Eval",
+  "description": "A benchmark configuration. Reproducible across runs.",
+  "type": "object",
+  "required": ["id", "name", "version", "task", "dataset", "metrics"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+    "name": { "type": "string" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "task": {
+      "type": "string",
+      "enum": ["discovery", "estimation", "rca", "forecast", "classification", "custom"]
+    },
+    "dataset": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "source": { "type": "string", "description": "URL or local path." },
+        "version": { "type": "string" },
+        "split": { "type": "string", "enum": ["train", "val", "test", "full"] }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "description": "e.g. 'shd', 'pehe', 'auroc'." },
+          "higher_is_better": { "type": "boolean" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "baselines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "score": { "type": "number" },
+          "source": { "type": "string" }
+        }
+      }
+    },
+    "citations": { "type": "array", "items": { "type": "string" } }
+  }
+}

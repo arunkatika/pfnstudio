@@ -1,0 +1,34 @@
+id: seasonal_trend
+slug: seasonal-trend
+name: "Seasonal + Trend"
+version: 0.1.0
+kind: temporal
+description: "Classic decomposition: a slow trend plus a periodic component plus noise. Demo-worthy for retail / energy / web traffic."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [80, 200]
+  noise_scale:
+    type: float
+    range: [0.05, 0.4]
+outputs:
+  variables:
+    - name: y
+      type: tensor
+      shape: "(N,)"
+    - name: X
+      type: tensor
+      shape: "(N, 1)"
+
+marketplace:
+  tagline: "y_t = trend(t) + seasonal(t) + noise"
+  longSummary: "Random slope for the trend, random period and amplitude for the seasonal. The model forecasts each component implicitly from a context window."
+  category: time_series
+  tags:
+    - temporal
+    - seasonality
+    - business
+  author:
+    name: "Community"
+    verified: false

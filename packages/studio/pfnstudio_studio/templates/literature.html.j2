@@ -1,0 +1,19 @@
+{% extends "_base.html.j2" %}
+{% block title %}Literature{% endblock %}
+{% block content %}
+<h1>Literature</h1>
+
+<h2>Summaries</h2>
+{% for s in lit_summaries %}
+  <section class="ps-card">
+    <h3>{{ s.frontmatter.title or s.path.name }} <span class="ps-pill">{{ s.frontmatter.year or '' }}</span> <span class="ps-pill">{{ s.frontmatter.relevance or '' }}</span></h3>
+    <p class="ps-muted">bibkey: <code>{{ s.frontmatter.bibkey or '?' }}</code></p>
+    {{ s.body | markdown | safe }}
+  </section>
+{% else %}
+  <p class="ps-empty">No paper summaries yet.</p>
+{% endfor %}
+
+<h2>references.bib</h2>
+<pre>{{ bib }}</pre>
+{% endblock %}

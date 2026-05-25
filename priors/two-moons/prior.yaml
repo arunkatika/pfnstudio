@@ -1,0 +1,43 @@
+id: two_moons
+slug: two-moons
+name: "Two-Moons Classification"
+version: 0.1.0
+kind: tabular
+description: "Classification analogue of linear regression. Each task is a fresh draw of the two-moons geometry — the PFN learns a generic 2D classifier."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [60, 200]
+    description: "Points per task"
+  noise_scale:
+    type: float
+    range: [0.05, 0.3]
+    description: "Per-point Gaussian perturbation"
+  radius:
+    type: float
+    default: 1.0
+    description: "Distance from origin to each moon's spine"
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, 2)"
+    - name: labels
+      type: tensor
+      shape: "(N,) ∈ {0,1}"
+citations:
+  - mueller2022pfn
+
+marketplace:
+  tagline: "Random interlocking half-moons + 0/1 labels"
+  longSummary: "Per-task rotation, noise, and translation so the model can\\"
+  category: classification
+  tags:
+    - tabular
+    - 2d
+    - classroom
+  author:
+    name: "PFN Studio Team"
+    verified: true
+  featured: true

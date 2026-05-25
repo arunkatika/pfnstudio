@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://priorstudio.dev/schemas/model.schema.json",
+  "title": "Model",
+  "description": "An architecture config. Composable from blocks in core/.",
+  "type": "object",
+  "required": ["id", "name", "version", "blocks"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+    "name": { "type": "string" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "description": { "type": "string" },
+    "blocks": {
+      "type": "array",
+      "description": "Ordered architecture blocks. Each names a registered block type and its config.",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "description": "Block type, e.g. 'temporal_encoder', 'causal_attention', 'treatment_head'." },
+          "name": { "type": "string", "description": "Optional alias for referencing this block elsewhere." },
+          "config": { "type": "object", "additionalProperties": true }
+        }
+      }
+    },
+    "input_shape": { "type": "string", "description": "Symbolic, e.g. '(B, T, D)'." },
+    "output_heads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "task"],
+        "properties": {
+          "name": { "type": "string" },
+          "task": {
+            "type": "string",
+            "enum": ["discovery", "estimation", "rca", "forecast", "classification", "custom"]
+          }
+        }
+      }
+    },
+    "citations": { "type": "array", "items": { "type": "string" } }
+  }
+}

@@ -1,0 +1,41 @@
+id: linear_scm
+slug: linear-scm
+name: "Linear SCM Discovery"
+version: 0.1.0
+kind: tabular
+description: "Random sparse linear structural causal models. The PFN outputs an adjacency matrix — pure structure discovery, no fitted edges."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [100, 400]
+  d:
+    type: int
+    range: [3, 10]
+    description: "Number of variables"
+  edge_prob:
+    type: float
+    range: [0.1, 0.7]
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, d)"
+    - name: A
+      type: tensor
+      shape: "(d, d) ∈ {0,1}"
+citations:
+  - zheng2018notears
+
+marketplace:
+  tagline: "Recover the DAG behind linear y = Ax + ε"
+  longSummary: "Erdős–Rényi DAGs with random linear weights. The training target is the {0,1} adjacency. After training the model recovers structure from observational data in one pass — fast alternative to NOTEARS / GES."
+  category: causal
+  tags:
+    - discovery
+    - graph
+    - structure
+  author:
+    name: "PFN Studio Team"
+    verified: true
+  featured: true

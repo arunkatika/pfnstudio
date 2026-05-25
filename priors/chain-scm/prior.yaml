@@ -1,0 +1,38 @@
+id: chain_scm
+slug: chain-scm
+name: "Causal Chain Discovery"
+version: 0.1.0
+kind: tabular
+description: "Specialised version of the SCM prior with chain-shaped DAGs. Faster to learn than full ER-DAGs and matches a common scientific use case."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [100, 400]
+  d:
+    type: int
+    range: [3, 8]
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, d)"
+    - name: A
+      type: tensor
+      shape: "(d, d) ∈ {0,1}"
+axes:
+  - name: monotonicity
+citations:
+  - zheng2018notears
+
+marketplace:
+  tagline: "Detect X → Y → Z chains from data alone"
+  longSummary: "Each task is a random permutation of variables wired as a chain. Useful as a sanity check for any discovery PFN — if it can\\"
+  category: causal
+  tags:
+    - discovery
+    - graph
+    - chain
+  author:
+    name: "Community"
+    verified: false

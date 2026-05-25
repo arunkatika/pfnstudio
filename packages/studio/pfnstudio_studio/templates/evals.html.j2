@@ -1,0 +1,29 @@
+{% extends "_base.html.j2" %}
+{% block title %}Evals{% endblock %}
+{% block content %}
+<h1>Evals</h1>
+{% for e in evals %}
+  <section class="ps-card">
+    <h2>{{ e.name or e.id }} <span class="ps-pill">v{{ e.version }}</span> <span class="ps-pill">{{ e.task }}</span></h2>
+    <p class="ps-muted">id: <code>{{ e.id }}</code></p>
+    <p>{{ e.description }}</p>
+    <h3>Dataset</h3>
+    <p><strong>{{ e.dataset.name }}</strong>{% if e.dataset.version %} ({{ e.dataset.version }}){% endif %} — {{ e.dataset.split or 'full' }}{% if e.dataset.source %} · <a href="{{ e.dataset.source }}">source</a>{% endif %}</p>
+    <h3>Metrics</h3>
+    <table class="ps-table">
+      <thead><tr><th>metric</th><th>direction</th><th>description</th></tr></thead>
+      <tbody>
+        {% for met in e.metrics %}
+          <tr><td><code>{{ met.name }}</code></td><td>{{ '↑' if met.higher_is_better else '↓' if met.higher_is_better == false else '' }}</td><td>{{ met.description or '' }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if e.baselines %}
+      <h3>Baselines</h3>
+      <ul>{% for b in e.baselines %}<li><code>{{ b.name }}</code>{% if b.score is not none %} = {{ b.score }}{% endif %}{% if b.source %} <span class="ps-muted">({{ b.source }})</span>{% endif %}</li>{% endfor %}</ul>
+    {% endif %}
+  </section>
+{% else %}
+  <p class="ps-empty">No evals yet.</p>
+{% endfor %}
+{% endblock %}

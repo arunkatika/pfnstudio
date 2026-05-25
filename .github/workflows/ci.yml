@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-typecheck-test:
+    name: lint + types + tests (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install packages (editable)
+        run: |
+          python -m pip install --upgrade pip
+          # Core runtime. [torch] pulls CPU PyTorch so the training-loop
+          # smoke tests can actually run.
+          pip install -e packages/core[torch]
+          pip install -e packages/cli
+          pip install -e packages/studio
+          pip install ruff mypy pytest
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Ruff (format check)
+        run: ruff format --check .
+
+      - name: mypy
+        run: mypy packages/
+        continue-on-error: true   # tighten once strict pass is clean
+
+      - name: pytest
+        run: pytest tests/ -q
+
+  validate-priors:
+    name: validate every prior + sample 3 seeds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/core
+          pip install -e packages/cli
+
+      - name: Validate every prior YAML against the schema
+        # The CLI walks the project root and validates all artifacts in one shot.
+        run: pfnstudio validate .
+
+      - name: Sample 3 tasks from each prior (smoke)
+        # CLI: `pfnstudio sample PROJECT PRIOR-SLUG --count N --seed S`
+        run: |
+          for dir in priors/*/; do
+            slug=$(basename "$dir")
+            echo "::group::Sample $slug"
+            pfnstudio sample . "$slug" --count 3 > /dev/null
+            echo "::endgroup::"
+          done

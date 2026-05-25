@@ -1,0 +1,34 @@
+{% extends "_base.html.j2" %}
+{% block title %}{{ project_name }}{% endblock %}
+{% block content %}
+<section class="ps-card">
+  {{ readme | markdown | safe }}
+</section>
+
+<section class="ps-grid">
+  <a class="ps-tile" href="priors.html">
+    <h3>Priors</h3>
+    <p class="ps-count">{{ priors | length }}</p>
+  </a>
+  <a class="ps-tile" href="models.html">
+    <h3>Models</h3>
+    <p class="ps-count">{{ models | length }}</p>
+  </a>
+  <a class="ps-tile" href="evals.html">
+    <h3>Evals</h3>
+    <p class="ps-count">{{ evals | length }}</p>
+  </a>
+  <a class="ps-tile" href="runs.html">
+    <h3>Runs</h3>
+    <p class="ps-count">{{ runs | length }}</p>
+  </a>
+  <a class="ps-tile" href="initiatives.html">
+    <h3>Initiatives</h3>
+    <p class="ps-count">{{ initiatives | length }}</p>
+  </a>
+  <a class="ps-tile" href="literature.html">
+    <h3>Literature</h3>
+    <p class="ps-count">{{ lit_summaries | length }}</p>
+  </a>
+</section>
+{% endblock %}

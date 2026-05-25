@@ -1,0 +1,36 @@
+id: hierarchical_normal
+slug: hierarchical-normal
+name: "Hierarchical Normal"
+version: 0.1.0
+kind: tabular
+description: "Two-level normal model. Groups share information through a population mean — the canonical multi-level / mixed-effects setup."
+implementation: prior.py
+parameters:
+  num_groups:
+    type: int
+    range: [4, 20]
+  per_group:
+    type: int
+    range: [5, 30]
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, 2)"
+    - name: y
+      type: tensor
+      shape: "(N,)"
+citations:
+  - gelman2013bda
+
+marketplace:
+  tagline: "μ_g ~ N(μ_0, τ); y ~ N(μ_g, σ)"
+  longSummary: "The PFN learns partial-pooling automatically: small groups borrow strength from the population, large groups stay near their group mean."
+  category: probabilistic
+  tags:
+    - bayesian
+    - hierarchical
+    - partial-pooling
+  author:
+    name: "Community"
+    verified: false

@@ -1,0 +1,4 @@
+# Populated at build time by ../../scripts/sync-bundled.sh.
+# The canonical sources live at the repo root (schemas/, templates/).
+*
+!.gitignore

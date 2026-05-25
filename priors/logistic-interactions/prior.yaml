@@ -1,0 +1,39 @@
+id: logistic_interactions
+slug: logistic-interactions
+name: "Logistic w/ Feature Interactions"
+version: 0.1.0
+kind: tabular
+description: "Logistic regression with pairwise feature interactions baked in. Trains a PFN that picks up cross-feature signal automatically."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [100, 400]
+  dim:
+    type: int
+    range: [3, 12]
+  interaction_density:
+    type: float
+    range: [0, 0.5]
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, dim)"
+    - name: labels
+      type: tensor
+      shape: "(N,)"
+citations:
+  - mueller2022pfn
+
+marketplace:
+  tagline: "σ(w·x + interactions) with random weights"
+  longSummary: "Random main effects + a sparse random interaction matrix. The model has to learn that two features only become predictive together — harder than linear logistic."
+  category: classification
+  tags:
+    - tabular
+    - interactions
+    - advanced
+  author:
+    name: "Community"
+    verified: false

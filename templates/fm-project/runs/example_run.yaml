@@ -1,0 +1,32 @@
+id: example_run_v0_1
+description: Baseline run — example linear SCM prior + example transformer, eval on Sachs.
+
+prior:
+  id: example_linear_scm
+  version: 0.1.0
+  overrides:
+    num_variables: 11
+    num_samples: 1000
+
+model:
+  id: example_transformer
+  version: 0.1.0
+
+evals:
+  - id: example_sachs
+    version: 0.1.0
+
+hyperparams:
+  optimizer: adamw
+  lr: 1.0e-4
+  batch_size: 32
+  steps: 100000
+  seed: 42
+
+compute:
+  target: vast
+  gpu: A100-80GB
+  num_gpus: 1
+
+tracking:
+  wandb_project: example-fm

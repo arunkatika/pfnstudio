@@ -1,0 +1,36 @@
+id: gp_regression
+slug: gp-regression
+name: "GP Regression (RBF)"
+version: 0.1.0
+kind: tabular
+description: "Functions sampled from a Gaussian Process with an RBF kernel. The model learns to do GP regression at inference without solving the kernel system."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [40, 120]
+  noise_scale:
+    type: float
+    range: [0.05, 0.3]
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, 1)"
+    - name: y
+      type: tensor
+      shape: "(N,)"
+citations:
+  - mueller2022pfn
+  - rasmussen2006gp
+
+marketplace:
+  tagline: "y ~ GP(0, k_RBF(x, x\\"
+  longSummary: "Per-task random lengthscale and signal variance. The PFN approximates the GP posterior in one forward pass — orders-of-magnitude faster than the closed-form solve at long context."
+  category: regression
+  tags:
+    - gaussian-process
+    - nonlinear
+    - advanced
+  author:
+    name: "Müller et al."

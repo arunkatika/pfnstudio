@@ -1,0 +1,30 @@
+id: example_transformer
+name: Example Transformer
+version: 0.1.0
+description: Minimal transformer for in-context inference on a tabular prior.
+
+input_shape: "(B, N, D)"
+
+blocks:
+  - type: tabular_embedder
+    name: embed
+    config:
+      d_model: 256
+  - type: transformer_encoder
+    name: encoder
+    config:
+      d_model: 256
+      n_heads: 8
+      n_layers: 6
+      dropout: 0.1
+  - type: causal_attention_pool
+    name: pool
+
+output_heads:
+  - name: structure_head
+    task: discovery
+  - name: effect_head
+    task: estimation
+
+citations:
+  - mueller2022pfn

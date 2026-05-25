@@ -1,0 +1,39 @@
+id: polynomial_regression
+slug: polynomial-regression
+name: "Polynomial Regression"
+version: 0.1.0
+kind: tabular
+description: "Random polynomial functions up to degree D. Generalises linear regression with curvature; the model learns to fit smooth nonlinear shapes in-context."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [50, 200]
+  max_degree:
+    type: int
+    range: [1, 6]
+    description: "Highest polynomial degree to sample"
+  noise_scale:
+    type: float
+    range: [0.05, 0.5]
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, 1)"
+    - name: y
+      type: tensor
+      shape: "(N,)"
+citations:
+  - mueller2022pfn
+
+marketplace:
+  tagline: "y = Σ c_k · x^k + noise"
+  longSummary: "Sample polynomial coefficients up to a max degree, evaluate on N points with Gaussian noise. Good first step before kernel methods."
+  category: regression
+  tags:
+    - tabular
+    - nonlinear
+  author:
+    name: "PFN Studio Team"
+    verified: true

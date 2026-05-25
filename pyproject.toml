@@ -1,0 +1,36 @@
+# Workspace-level pyproject. The actual installable package lives at packages/cli.
+# This top-level file exists so dev tools (ruff, mypy, pytest) can run from the repo root.
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "E501",     # line too long — formatter handles it
+  "RUF001",   # ambiguous Unicode in strings (× — ✓) — used for output
+  "RUF002",   # ambiguous Unicode in docstrings — used for prose
+  "RUF003",   # ambiguous Unicode in comments — used for prose
+  "SIM105",   # try/except/pass — clearer than contextlib.suppress for one-offs
+  "SIM108",   # ternary — readability call, not a bug
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Math + ML convention: design matrices and weight tensors are uppercase
+# (X, A, K, W, R) by universal convention. `F = torch.nn.functional` is
+# how every PyTorch codebase imports it.
+"priors/**/*.py" = ["N803", "N806", "RUF012"]
+"templates/**/*.py" = ["N803", "N806", "RUF012"]
+"tests/**/*.py" = ["N803", "N806", "RUF012", "E402"]
+"examples/**/*.py" = ["N803", "N806"]
+"packages/core/pfnstudio_core/axes/*.py" = ["N806", "N812"]
+"packages/core/pfnstudio_core/scorers/*.py" = ["N806"]
+"packages/core/pfnstudio_core/training/*.py" = ["N806"]
+# typer/click idiom: Argument/Option calls in defaults are how the framework
+# wants you to declare CLI parameters. Same for Path.cwd() as a sensible
+# default — re-evaluating per-invocation is the point.
+"packages/cli/pfnstudio/cli.py" = ["B008", "N806"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages"]

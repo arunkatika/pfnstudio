@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://priorstudio.dev/schemas/prior.schema.json",
+  "title": "Prior",
+  "description": "A synthetic data generator for a prior-fitted foundation model. Each prior has this YAML spec plus a Python implementation in the same directory.",
+  "type": "object",
+  "required": ["id", "name", "version", "kind", "parameters", "outputs"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "Stable identifier, kebab/snake-case. Must match directory name."
+    },
+    "name": { "type": "string" },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semver. Bump major when sampling distribution changes."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["scm", "tabular", "temporal", "temporal_causal", "graph", "custom"],
+      "description": "What family of structure the prior generates."
+    },
+    "description": { "type": "string" },
+    "parameters": {
+      "type": "object",
+      "description": "Hyperparameters of the prior. Keys are parameter names; values describe sampling.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["int", "float", "categorical", "bool"]
+          },
+          "range": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "[min, max] for int/float."
+          },
+          "choices": {
+            "type": "array",
+            "description": "Values for categorical."
+          },
+          "default": {},
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "description": "Shape of one sample from the prior.",
+      "required": ["variables"],
+      "properties": {
+        "variables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string" },
+              "type": {
+                "type": "string",
+                "enum": ["scalar", "tensor", "graph", "matrix"]
+              },
+              "shape": { "type": "string", "description": "Symbolic shape, e.g. '(T, D)'." },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "citations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "BibTeX keys from literature/references.bib."
+    },
+    "implementation": {
+      "type": "string",
+      "description": "Path to Python module (relative to prior directory).",
+      "default": "prior.py"
+    }
+  }
+}

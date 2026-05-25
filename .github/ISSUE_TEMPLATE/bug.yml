@@ -1,0 +1,65 @@
+name: 🐛 Bug report
+description: Something broke. Help us narrow it down.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A few quick details get us to a fix faster.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: One- or two-sentence summary, plus the full error / traceback if there is one.
+      placeholder: |
+        Running `pfnstudio sample priors/foo/prior.yaml` raises ModuleNotFoundError:
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands or code. We need to be able to run them and see the same thing.
+      placeholder: |
+        1. `git clone https://github.com/profitopsai/pfnstudio`
+        2. `cd pfnstudio && pip install -e packages/core[torch]`
+        3. `pfnstudio sample priors/linear-regression/prior.yaml --seeds 1`
+        4. Error appears
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: false
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: Output of `python --version`
+      placeholder: "3.11.7"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS / platform
+      placeholder: "macOS 14.5 (arm64)  ·  Ubuntu 22.04  ·  WSL2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: packages
+    attributes:
+      label: PFN Studio package versions
+      description: Output of `pip show pfnstudio-core pfnstudio pfnstudio-studio | grep -E "Name|Version"` (or "installed from source" if editable).
+      render: shell
+    validations:
+      required: false

@@ -1,0 +1,27 @@
+{% extends "_base.html.j2" %}
+{% block title %}Models{% endblock %}
+{% block content %}
+<h1>Models</h1>
+{% for m in models %}
+  <section class="ps-card">
+    <h2>{{ m.name or m.id }} <span class="ps-pill">v{{ m.version }}</span></h2>
+    <p class="ps-muted">id: <code>{{ m.id }}</code></p>
+    <p>{{ m.description }}</p>
+    <h3>Blocks</h3>
+    <ol>
+      {% for b in (m.blocks or []) %}
+        <li>
+          <code>{{ b.type }}</code>{% if b.name %} <span class="ps-muted">({{ b.name }})</span>{% endif %}
+          {% if b.config %}<pre>{{ b.config | tojson(indent=2) }}</pre>{% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+    {% if m.output_heads %}
+      <h3>Output heads</h3>
+      <ul>{% for h in m.output_heads %}<li><code>{{ h.name }}</code> — {{ h.task }}</li>{% endfor %}</ul>
+    {% endif %}
+  </section>
+{% else %}
+  <p class="ps-empty">No models yet.</p>
+{% endfor %}
+{% endblock %}

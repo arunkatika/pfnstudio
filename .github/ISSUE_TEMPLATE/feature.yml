@@ -1,0 +1,54 @@
+name: ✨ Feature request
+description: Propose a new prior, scorer, block, or capability.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Short and concrete works best.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of contribution is this?
+      options:
+        - New prior (synthetic data generator)
+        - New scorer (real-data eval)
+        - New block (model architecture component)
+        - CLI / runtime feature
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: One- or two-sentence summary.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: The motivation. Link a paper / use-case if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: Rough shape
+      description: For a prior, what does `sample()` return? For a scorer, what metric on what dataset? For a block, what tensor in / tensor out?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Want to send a PR?
+      description: Totally optional — flagging interest helps us avoid duplicate work.
+      options:
+        - label: I'd like to implement this

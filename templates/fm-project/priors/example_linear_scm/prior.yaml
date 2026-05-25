@@ -1,0 +1,51 @@
+id: example_linear_scm
+name: Example Linear SCM Prior
+version: 0.1.0
+kind: scm
+description: |
+  Sample a random linear structural causal model (SCM) over D variables.
+  For each sample: draw a random DAG, draw linear coefficients, draw noise scales,
+  generate observational data. Useful as a smoke-test prior — replace with the
+  real one for your project.
+
+parameters:
+  num_variables:
+    type: int
+    range: [3, 20]
+    description: Number of nodes in the SCM.
+  edge_density:
+    type: float
+    range: [0.1, 0.5]
+    description: Probability of an edge between any two ordered nodes.
+  coefficient_range:
+    type: float
+    range: [0.5, 2.0]
+    description: Magnitude range for linear coefficients.
+  noise_scale:
+    type: float
+    range: [0.1, 1.0]
+    description: Std-dev of additive Gaussian noise on each variable.
+  num_samples:
+    type: int
+    range: [100, 5000]
+    description: Number of observational samples per task.
+
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(num_samples, num_variables)"
+      description: Observational data.
+    - name: A
+      type: matrix
+      shape: "(num_variables, num_variables)"
+      description: Ground-truth adjacency matrix (binary).
+    - name: W
+      type: matrix
+      shape: "(num_variables, num_variables)"
+      description: Ground-truth weight matrix (real-valued).
+
+citations:
+  - peters2017elements
+
+implementation: prior.py

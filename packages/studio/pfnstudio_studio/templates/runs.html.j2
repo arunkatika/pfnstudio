@@ -1,0 +1,25 @@
+{% extends "_base.html.j2" %}
+{% block title %}Runs{% endblock %}
+{% block content %}
+<h1>Runs</h1>
+{% for r in runs %}
+  <section class="ps-card">
+    <h2>{{ r.id }}</h2>
+    <p>{{ r.description }}</p>
+    <div class="ps-meta">
+      <span class="ps-pill">prior: {{ r.prior.id }}@{{ r.prior.version }}</span>
+      <span class="ps-pill">model: {{ r.model.id }}@{{ r.model.version }}</span>
+      {% for ev in r.evals %}<span class="ps-pill">eval: {{ ev.id }}@{{ ev.version }}</span>{% endfor %}
+      {% if r.compute %}<span class="ps-pill">{{ r.compute.target }}{% if r.compute.gpu %} · {{ r.compute.gpu }}{% endif %}</span>{% endif %}
+    </div>
+    <h3>Hyperparams</h3>
+    <pre>{{ r.hyperparams | tojson(indent=2) }}</pre>
+    {% if r.results %}
+      <h3>Results</h3>
+      <pre>{{ r.results | tojson(indent=2) }}</pre>
+    {% endif %}
+  </section>
+{% else %}
+  <p class="ps-empty">No runs yet.</p>
+{% endfor %}
+{% endblock %}

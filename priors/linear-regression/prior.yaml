@@ -1,0 +1,47 @@
+id: linear_regression
+slug: linear-regression
+name: "Linear Regression"
+version: 0.1.0
+kind: tabular
+description: "The reference PFN prior. Random linear functions with Gaussian noise — the simplest demonstrable PFN training task."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [50, 200]
+    description: "Points per task"
+  coefficient_range:
+    type: float
+    range: [0.5, 2.0]
+    description: "Coefficient |a| magnitude bound"
+  intercept_range:
+    type: float
+    range: [0.0, 1.0]
+    description: "Intercept |b| magnitude bound"
+  noise_scale:
+    type: float
+    range: [0.05, 0.5]
+    description: "Noise σ"
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, 1)"
+    - name: y
+      type: tensor
+      shape: "(N,)"
+citations:
+  - mueller2022pfn
+
+marketplace:
+  tagline: "y = a·x + b + noise"
+  longSummary: "Each task samples a fresh slope and intercept, then N noisy (x, y) pairs. After training, the model performs linear regression on any new dataset in a single forward pass."
+  category: regression
+  tags:
+    - tabular
+    - beginner
+    - classroom
+  author:
+    name: "PFN Studio Team"
+    verified: true
+  featured: true

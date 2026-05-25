@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+.deps-venv/
+venv/
+ENV/
+env/
+
+# Editable-install metadata
+_editable_impl_*.pth
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# pytest / coverage / mypy
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Build artifacts
+checkpoint/
+runs/*/checkpoint/
+runs/*/results.json
+runs/*/metrics.jsonl
+*.pt
+*.pth
+
+# Dataset cache (downloaded benchmark datasets)
+.priorstudio/datasets/
+
+# Logs
+logs/
+*.log

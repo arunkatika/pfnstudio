@@ -1,0 +1,45 @@
+id: sine_wave
+slug: sine-wave
+name: "Sine Wave"
+version: 0.1.0
+kind: temporal
+description: "The simplest temporal PFN. Random amplitude, frequency, and phase per task; the model forecasts the continuation from a noisy prefix."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [60, 200]
+    description: "Timesteps per task"
+  amplitude_max:
+    type: float
+    default: 2.0
+    description: "Max latent amplitude (lower bound = 0.5)"
+  omega_range:
+    type: float
+    range: [0.5, 2.0]
+    description: "Angular frequency ω range"
+  noise_scale:
+    type: float
+    range: [0.05, 0.3]
+    description: "Noise σ range"
+outputs:
+  variables:
+    - name: y
+      type: tensor
+      shape: "(N,)"
+    - name: X
+      type: tensor
+      shape: "(N, 1)"
+citations:
+  - mueller2022pfn
+
+marketplace:
+  tagline: "y_t = a·sin(ω·t + φ) + noise"
+  longSummary: "A clean, well-understood time-series prior. Good warm-up before AR / ARMA / seasonal priors."
+  category: time_series
+  tags:
+    - temporal
+    - classroom
+  author:
+    name: "PFN Studio Team"
+    verified: true

@@ -1,0 +1,37 @@
+id: ar2_process
+slug: ar2-process
+name: "AR(2) Time Series"
+version: 0.1.0
+kind: temporal
+description: "Real-world-shaped time series. Random stationary AR(2) coefficients per task; the PFN learns to forecast any well-behaved autoregressive series."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [80, 200]
+  noise_scale:
+    type: float
+    range: [0.1, 0.5]
+outputs:
+  variables:
+    - name: y
+      type: tensor
+      shape: "(N,)"
+    - name: X
+      type: tensor
+      shape: "(N, 1)"
+citations:
+  - mueller2022pfn
+
+marketplace:
+  tagline: "y_t = φ₁·y_{t-1} + φ₂·y_{t-2} + ε_t"
+  longSummary: "Stationarity-triangle rejection sampling keeps training bounded. Closer to real industrial data (sensors, demand, traffic) than a sine wave."
+  category: time_series
+  tags:
+    - temporal
+    - autoregressive
+    - industrial
+  author:
+    name: "PFN Studio Team"
+    verified: true
+  featured: true

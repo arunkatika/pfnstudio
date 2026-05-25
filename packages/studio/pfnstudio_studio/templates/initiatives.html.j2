@@ -1,0 +1,20 @@
+{% extends "_base.html.j2" %}
+{% block title %}Initiatives{% endblock %}
+{% block content %}
+<h1>Initiatives</h1>
+{% for it in initiatives %}
+  {% set fm = it.frontmatter %}
+  <section class="ps-card">
+    <h2>{{ fm.title or fm.id }}</h2>
+    <div class="ps-meta">
+      <span class="ps-pill ps-status-{{ fm.status or 'unknown' }}">{{ fm.status }}</span>
+      {% if fm.version_target %}<span class="ps-pill">{{ fm.version_target }}</span>{% endif %}
+      {% if fm.owner %}<span class="ps-pill">@{{ fm.owner }}</span>{% endif %}
+      {% for t in (fm.tags or []) %}<span class="ps-pill">#{{ t }}</span>{% endfor %}
+    </div>
+    {{ it.body | markdown | safe }}
+  </section>
+{% else %}
+  <p class="ps-empty">No initiatives yet. Create one in <code>initiatives/</code>.</p>
+{% endfor %}
+{% endblock %}

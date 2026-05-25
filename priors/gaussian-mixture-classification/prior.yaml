@@ -1,0 +1,40 @@
+id: gaussian_mixture_cls
+slug: gaussian-mixture-classification
+name: "Gaussian-Mixture Classification"
+version: 0.1.0
+kind: tabular
+description: "Random Gaussian mixtures in D dimensions. Trains a PFN that does Bayesian-optimal classification on any well-separated mixture."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [80, 400]
+  num_classes:
+    type: int
+    range: [2, 5]
+    description: "Number of mixture components"
+  dim:
+    type: int
+    range: [2, 16]
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, dim)"
+    - name: labels
+      type: tensor
+      shape: "(N,)"
+citations:
+  - mueller2022pfn
+
+marketplace:
+  tagline: "Per-task GMM with K components → K-class labels"
+  longSummary: "Sample K random means + covariances per task, draw N points by component, assign labels by component index. Higher-D extension of two-moons; closer to real tabular classification."
+  category: classification
+  tags:
+    - tabular
+    - multi-class
+    - mixture-model
+  author:
+    name: "PFN Studio Team"
+    verified: true

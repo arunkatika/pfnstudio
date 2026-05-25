@@ -1,0 +1,99 @@
+PriorStudio
+Copyright 2026 ProfitOps.ai
+
+This product includes software developed at ProfitOps.ai
+(https://profitops.ai) and is licensed under the Apache License,
+Version 2.0 (see LICENSE).
+
+
+─────────────────────────────────────────────────────────────────────────
+Foundational research
+─────────────────────────────────────────────────────────────────────────
+
+PriorStudio implements the Prior-Data Fitted Networks paradigm
+introduced in:
+
+  Müller, Hollmann, Pineda, Hutter — "Transformers Can Do Bayesian
+  Inference". ICLR 2022. https://arxiv.org/abs/2112.10510
+
+The prior interface, training loop, and reference implementations are
+faithful ports of patterns established in the AutoML group's PFNs
+library (https://github.com/automl/PFNs, Apache-2.0). We are grateful
+to the authors for publishing their work openly.
+
+
+─────────────────────────────────────────────────────────────────────────
+Templates derived from upstream OSS projects
+─────────────────────────────────────────────────────────────────────────
+
+Several project templates in `priors/` and packaged in the studio
+marketplace are derived from publicly licensed research code. Each
+template's README lists its upstream source and license. None of
+PriorStudio's code is a binary fork; every template is a fresh
+implementation that follows the upstream's published prior spec and
+attribution requirements.
+
+  PFNs                  Apache-2.0    automl/PFNs
+                        Müller, Hollmann, Pineda, Hutter (ICLR 2022)
+
+  TabPFN                Prior Labs License (Apache-2.0 + attribution)
+                        PriorLabs/TabPFN
+                        Hollmann, Müller, Hutter (Nature 2025)
+
+  TabPFN-TS             Apache-2.0    PriorLabs/tabpfn-time-series
+                        Hoo, Müller, Hollmann et al. (arXiv 2501.02945)
+
+  MotherNet             Apache-2.0    microsoft/mothernet
+                        Müller, Curino, Ramakrishnan (arXiv 2312.08598)
+
+  PFNs4BO               Apache-2.0    automl/PFNs4BO
+                        Müller, Feurer, Hollmann, Hutter (ICML 2023)
+
+  ifBO                  MIT           automl/ifBO
+                        Rakotoarison, Adriaensen, Müller et al. (ICML 2024)
+
+  LC-PFN                MIT           automl/lcpfn
+                        Adriaensen, Rakotoarison, Müller, Hutter (NeurIPS 2023)
+
+  TabICL                BSD-3-Clause  soda-inria/tabicl
+                        Qu, Holzmüller, Le Morvan et al. (arXiv 2502.05564)
+
+  KinPFN                Apache-2.0    automl/KinPFN
+                        Scheuer, Runge et al. (ICLR 2025)
+
+
+─────────────────────────────────────────────────────────────────────────
+Benchmark datasets referenced by the registry
+─────────────────────────────────────────────────────────────────────────
+
+The dataset registry catalogues these public benchmarks; PriorStudio
+does not redistribute them. Each is fetched on demand from its
+upstream source and used under its original license.
+
+  M4 Competition (M4-monthly)    CC-BY-4.0       Mcompetitions/M4-methods
+                                  Makridakis, Spiliotis, Assimakopoulos
+                                  Int J Forecast 36 (2020)
+
+  LCBench                        MIT             automl/LCBench
+                                  Zimmer, Lindauer, Hutter (PAMI 2021)
+
+  HPO-B                          Apache-2.0      releaunifreiburg/HPO-B
+                                  Pineda Arango et al. (NeurIPS 2021 Datasets)
+
+  PD1                            Apache-2.0      google-research/hyperbo
+                                  Wang et al. (2024)
+
+  Kinfold / ViennaRNA            ViennaRNA       ViennaRNA/ViennaRNA
+                                  Lorenz et al. (Algorithms Mol Biol 2011)
+
+
+─────────────────────────────────────────────────────────────────────────
+Third-party Python dependencies
+─────────────────────────────────────────────────────────────────────────
+
+Dependencies are listed in each package's pyproject.toml under
+[project.dependencies] and [project.optional-dependencies]. Notable
+runtime dependencies include numpy (BSD-3-Clause), pydantic
+(MIT), pyyaml (MIT), and torch (BSD-3-Clause, optional). The complete
+license list and version constraints are reproduced in the lockfile
+when the package is installed.

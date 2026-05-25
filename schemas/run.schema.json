@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://priorstudio.dev/schemas/run.schema.json",
+  "title": "Run",
+  "description": "An experiment manifest. Pins a prior, model, eval, hyperparams, and compute target.",
+  "type": "object",
+  "required": ["id", "prior", "model", "evals", "hyperparams"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+    "description": { "type": "string" },
+    "prior": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string" },
+        "overrides": { "type": "object", "description": "Parameter overrides for this run." }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "evals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "version"],
+        "properties": {
+          "id": { "type": "string" },
+          "version": { "type": "string" }
+        }
+      }
+    },
+    "hyperparams": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Free-form, but conventionally: lr, batch_size, steps, seed, optimizer."
+    },
+    "compute": {
+      "type": "object",
+      "properties": {
+        "target": { "type": "string", "enum": ["local", "vast", "modal", "runpod", "hf_spaces", "custom"] },
+        "gpu": { "type": "string", "description": "e.g. 'A100-80GB', 'H100'." },
+        "num_gpus": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "tracking": {
+      "type": "object",
+      "properties": {
+        "wandb_project": { "type": "string" },
+        "wandb_run_id": { "type": "string" },
+        "hf_repo": { "type": "string" }
+      }
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Filled in after the run completes."
+    }
+  }
+}
