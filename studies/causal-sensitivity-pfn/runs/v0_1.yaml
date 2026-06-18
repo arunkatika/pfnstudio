@@ -1,0 +1,32 @@
+id: causal_sensitivity_pfn_v0_1
+description: |
+  v0.1 — in-context CATE recovery on MLP-SCM tasks with unobserved
+  confounding. 4-layer PFN (d_model=128), 8000 steps, Adam + cosine.
+
+  Hyperparams pinned to the upstream defaults from
+  github.com/EmilJavurek/Amortizing-Causal-Sensitivity-Analysis-via-PFNs
+  where they translate (Adam, lr=1e-3, batch_size=32, weight_decay=1e-5,
+  clip_grad=1.0). Step count chosen to land at ~12-15 min on H100/H200
+  for the demo; full paper-scale training uses 150 epochs over a much
+  larger pre-generated DGP pool.
+
+prior:
+  id: mlp_sensitivity_scm
+  version: 0.1.0
+
+model:
+  id: causal_pfn
+  version: 0.1.0
+
+evals:
+  - id: cate_recovery
+    version: 0.1.0
+
+hyperparams:
+  optimizer: adam
+  lr: 1.0e-3
+  batch_size: 32
+  steps: 8000
+  weight_decay: 1.0e-5
+  clip_grad_norm: 1.0
+  seed: 42

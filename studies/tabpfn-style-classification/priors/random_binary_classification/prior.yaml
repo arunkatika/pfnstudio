@@ -1,0 +1,50 @@
+id: random_binary_classification
+name: Random binary classification (packed for in-context PFN)
+version: 0.1.0
+kind: tabular
+description: |
+  Random hyperplane binary-classification tasks over D=30 features
+  (matching sklearn's breast-cancer benchmark). Each task draws a
+  fresh (w, b) hyperplane plus Gaussian feature vectors; labels come
+  from sigmoid(temperature * (w·x + b)) with a Bernoulli flip. Tasks
+  are packed as (context, query) token sequences with an n_ctx
+  boundary so the default classification step trains only on the
+  query positions.
+
+parameters:
+  num_points:
+    type: int
+    range: [64, 64]
+    description: Total points per task (context + query, packed in one sequence).
+  weight_std:
+    type: float
+    range: [0.5, 1.5]
+    description: Std-dev of the hyperplane weights — controls how varied tasks are.
+  bias_std:
+    type: float
+    range: [0.5, 1.5]
+    description: Std-dev of the bias term.
+  temperature:
+    type: float
+    range: [1.0, 4.0]
+    description: Sigmoid sharpness — higher = sharper decision boundary.
+
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, 32)"
+      description: "Packed (x[0..29], y_or_0, is_context) tokens — 30 features + 2 markers."
+    - name: labels
+      type: tensor
+      shape: "(n_query,)"
+      description: 0/1 labels at query positions only.
+    - name: n_ctx
+      type: scalar
+      description: Boundary index — default step slices logits here for classification.
+
+citations:
+  - hollmann2023tabpfn
+  - mueller2022pfn
+
+implementation: prior.py

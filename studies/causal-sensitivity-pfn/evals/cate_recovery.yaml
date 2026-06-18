@@ -1,0 +1,61 @@
+id: cate_recovery
+name: PFN vs naive vs oracle CATE recovery
+version: 0.1.0
+task: regression
+description: |
+  After training, draw 50 fresh DGPs from the same prior. For each one,
+  run the model on its packed (context, query) sequence and compare
+  predicted CATE at query positions against:
+
+    - **naive**: per-task regression of E[Y|T=1,X] - E[Y|T=0,X] fit on
+      the context. Biased under unobserved confounding — this is the
+      thing the PFN should beat. We fit it with a small ridge regression
+      per task (no held-out CV; the prior is in-distribution).
+    - **oracle**: the latent CATE the prior emits as `cate_true`. Lower
+      bound on achievable MSE; what a perfect causal estimator would
+      score. NOT achievable from (X, T, Y) alone in finite samples.
+
+  The headline number is the ratio of PFN MSE to naive MSE — a correctly
+  trained Causal PFN beats the confounded naive estimator. Distance to
+  oracle measures how much confounding the model removes.
+
+  This eval is synthetic — no external dataset. The "data" is fresh draws
+  from the same MLP-SCM prior the model was trained on. Backed by
+  `pfnstudio_core.scorers.cate_recovery.CateRecovery`.
+
+dataset:
+  name: synthetic-fresh-prior-draws
+  source: ""
+  split: ""
+
+metrics:
+  - name: pfn_mse
+    higher_is_better: false
+    description: PFN CATE-MSE on held-out query positions across 50 tasks.
+  - name: naive_mse
+    higher_is_better: false
+    description: |
+      Naive regression CATE-MSE — biased under unobserved confounding.
+      What an observational estimator does without sensitivity correction.
+  - name: oracle_mse
+    higher_is_better: false
+    description: |
+      MSE if we predict the latent CATE exactly. Floor (≈ 0); only nonzero
+      because of numerical drift in the Monte-Carlo CATE estimate.
+  - name: ratio_vs_naive
+    higher_is_better: true
+    description: naive_mse / pfn_mse — how many times better than naive.
+  - name: ratio_vs_oracle
+    higher_is_better: false
+    description: pfn_mse / oracle_mse — how close to perfect causal recovery.
+
+baselines:
+  - name: naive (per-task ridge)
+    score: null
+    source: fitted_per_task
+  - name: oracle (latent CATE)
+    score: 0.0
+    source: monte_carlo
+
+citations:
+  - javurek2026csa

@@ -1,0 +1,26 @@
+id: linear_regression_bayes_v0_1
+description: |
+  Baseline run — Bayesian linear regression prior + 3-layer PFN, 2000 steps,
+  batch 32. Reproduces the headline claim of Müller et al. ICLR 2022: the
+  trained transformer does in-context Bayesian regression in a single forward
+  pass, beating the mean baseline by ~100× and landing within ~1.3× of the
+  closed-form OLS solution.
+
+prior:
+  id: bayesian_linear
+  version: 0.1.0
+
+model:
+  id: in_context_pfn
+  version: 0.1.0
+
+evals:
+  - id: in_context_regression_ols
+    version: 0.1.0
+
+hyperparams:
+  optimizer: adamw
+  lr: 5.0e-4
+  batch_size: 32
+  steps: 2000
+  seed: 42

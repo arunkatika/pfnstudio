@@ -1,0 +1,25 @@
+id: tabpfn_classification_v0_1
+description: |
+  Baseline run — random-hyperplane classification prior + 3-layer PFN,
+  3000 steps, batch 32. After training, the model is applied zero-shot
+  to the sklearn breast-cancer dataset and compared against a logistic-
+  regression baseline (the eval scorer handles both context and query).
+
+prior:
+  id: random_binary_classification
+  version: 0.1.0
+
+model:
+  id: in_context_classifier
+  version: 0.1.0
+
+evals:
+  - id: breast_cancer_vs_logreg
+    version: 0.1.0
+
+hyperparams:
+  optimizer: adamw
+  lr: 3.0e-4
+  batch_size: 32
+  steps: 10000
+  seed: 42

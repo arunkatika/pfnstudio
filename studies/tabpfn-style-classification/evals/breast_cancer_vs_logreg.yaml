@@ -1,0 +1,53 @@
+id: breast_cancer_vs_logreg
+name: Breast-cancer zero-shot vs LogisticRegression
+version: 0.1.0
+task: classification
+description: |
+  Apply the trained in-context classifier zero-shot to the sklearn
+  breast-cancer (Wisconsin) dataset: 569 samples, 30 features, binary
+  label. A fixed 75/25 stratified split is used as (context, query);
+  the PFN runs in one forward pass over the packed sequence and is
+  compared against an sklearn LogisticRegression fit on the same
+  context.
+
+  The PFN has never seen this dataset during training — only the
+  random-binary-classification synthetic prior. The accuracy gap vs
+  LogReg is the headline number; on this benchmark a well-trained
+  PFN should land within a few points of LogReg, sometimes better.
+
+  Backed by `pfnstudio_core.scorers.breast_cancer_vs_logreg.BreastCancerVsLogReg`.
+  Requires `scikit-learn` at score time (not a hard dep of pfnstudio-core).
+
+dataset:
+  name: sklearn-breast-cancer
+  source: "https://goo.gl/U2Uwz2"
+  version: "1.0"
+  split: "75/25 stratified, random_state=42"
+
+metrics:
+  - name: pfn_accuracy
+    higher_is_better: true
+    description: PFN accuracy on the held-out 143 samples.
+  - name: pfn_auc
+    higher_is_better: true
+    description: PFN ROC-AUC on the held-out samples.
+  - name: logreg_accuracy
+    higher_is_better: true
+    description: LogisticRegression accuracy on the same split.
+  - name: logreg_auc
+    higher_is_better: true
+    description: LogisticRegression ROC-AUC on the same split.
+  - name: accuracy_gap_vs_logreg
+    higher_is_better: true
+    description: pfn_accuracy − logreg_accuracy (positive = PFN beats LogReg).
+
+baselines:
+  - name: LogisticRegression (sklearn)
+    score: 0.97
+    source: sklearn_default
+  - name: Majority class
+    score: 0.63
+    source: dataset_class_balance
+
+citations:
+  - hollmann2023tabpfn

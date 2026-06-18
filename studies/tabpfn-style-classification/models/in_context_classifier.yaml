@@ -1,0 +1,39 @@
+id: in_context_classifier
+name: 6-layer in-context PFN (classification head)
+version: 0.1.0
+description: |
+  Bigger than the linear-regression demo PFN: tabular embedder
+  (LazyLinear → d_model=128), 6-layer transformer encoder, scalar
+  head emitting one logit per position. The default training step
+  routes to BCE-with-logits because the prior emits a "labels" key.
+
+  Input dimension is implicit: the tabular_embedder auto-detects
+  d_in on first forward (LazyLinear), so this model works for any
+  packed-token width — D=30 + 2 markers here.
+
+input_shape: "(B, N, 32)"
+
+blocks:
+  - type: tabular_embedder
+    name: embed
+    config:
+      d_model: 128
+  - type: transformer_encoder
+    name: encoder
+    config:
+      d_model: 128
+      n_heads: 8
+      n_layers: 6
+      dropout: 0.0
+  - type: scalar_head
+    name: head
+    config:
+      d_model: 128
+      d_out: 1
+
+output_heads:
+  - name: pred_label
+    task: classification
+
+citations:
+  - hollmann2023tabpfn

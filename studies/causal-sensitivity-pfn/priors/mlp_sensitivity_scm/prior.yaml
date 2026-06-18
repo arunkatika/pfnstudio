@@ -1,0 +1,90 @@
+id: mlp_sensitivity_scm
+name: MLP-SCM for causal sensitivity (Javurek et al.)
+version: 0.1.0
+kind: tabular
+description: |
+  Synthetic structural causal model with MLP-parameterized treatment +
+  outcome equations and an unobserved confounder coupled to the outcome
+  only. Each sample is one DGP packed as a (context, query) sequence for
+  in-context CATE recovery.
+
+  Per-task sampling:
+    X  ~ N(0, I_d)                              ← d observed covariates
+    U  ~ N(0, 1)                                ← unobserved confounder
+    π(X)   = sigmoid(MLP_T(X))                  ← propensity
+    T  ~ Bernoulli(π(X))
+    Y0     = MLP_Y(X, 0, U) + ε                 ← potential outcome under T=0
+    Y1     = MLP_Y(X, 1, U) + ε                 ← potential outcome under T=1
+    Y      = T·Y1 + (1 - T)·Y0                  ← observed
+    CATE   = E_U[Y1 - Y0 | X]                   ← target
+
+  v0.1 target: model recovers CATE from (X, T, Y) context despite the
+  fact that U is never shown. The headline test is that the PFN beats
+  the naive E[Y|T=1,X] - E[Y|T=0,X] regression, which is biased under
+  unobserved confounding.
+
+  v0.2 will swap CATE for the Lagrangian-labeled sensitivity bound under
+  the Marginal Sensitivity Model with Γ ∈ [1, 4], reproducing the paper's
+  central contribution.
+
+parameters:
+  num_features:
+    type: int
+    range: [10, 10]
+    description: Dimension d of the observed covariate X.
+  num_samples:
+    type: int
+    range: [256, 256]
+    description: Points per task (context + query, packed in one sequence).
+  ctx_frac:
+    type: float
+    range: [0.75, 0.75]
+    description: Fraction used as context; the rest are queries.
+  outcome_hidden:
+    type: int
+    range: [32, 32]
+    description: Width of the outcome MLP's hidden layer.
+  propensity_hidden:
+    type: int
+    range: [16, 16]
+    description: Width of the propensity MLP's hidden layer.
+  u_strength:
+    type: float
+    range: [0.5, 2.0]
+    description: |
+      Coupling of U into the outcome — controls the magnitude of unobserved
+      confounding. Drawn fresh per task, so the model sees a range of
+      sensitivity regimes during training.
+  noise_scale:
+    type: float
+    range: [0.1, 0.3]
+    description: Std-dev of observation noise on Y.
+
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, d+3)"
+      description: |
+        Packed token = (x_1, ..., x_d, t, y_or_0, is_context_flag).
+        Context tokens carry T and observed Y; query tokens carry only X
+        with T and Y masked to 0 and is_context_flag=0.
+    - name: y
+      type: tensor
+      shape: "(n_query,)"
+      description: Target CATE for the query positions.
+    - name: n_ctx
+      type: scalar
+      description: Boundary index — the default training step slices logits here.
+    - name: cate_true
+      type: tensor
+      shape: "(num_samples,)"
+      description: Latent CATE for every point in the task (full task, not just query).
+    - name: u_strength
+      type: scalar
+      description: Per-task confounding strength — useful for stratified eval.
+
+citations:
+  - javurek2026csa
+
+implementation: prior.py

@@ -1,0 +1,58 @@
+{
+  "run_id": "tabpfn_classification_v0_1",
+  "status": "ok",
+  "steps": 10000,
+  "batch_size": 32,
+  "lr": 0.0003,
+  "seed": 42,
+  "training": {
+    "final_loss": 0.4393,
+    "mean_loss_last_10pct": 0.4605,
+    "wall_time_s": 815,
+    "params_total": "~700k"
+  },
+  "in_distribution_eval": {
+    "tasks": 100,
+    "points_per_task": 64,
+    "context_fraction": 0.75,
+    "accuracy": 0.770,
+    "bce": 0.468,
+    "mean_logit_positive_class": 1.335,
+    "mean_logit_negative_class": -1.297,
+    "note": "Fresh tasks drawn from the training prior. The model distinguishes the two classes cleanly (positive mean logit > 1.3, negative < -1.3) and reaches 77% accuracy on the synthetic distribution."
+  },
+  "zero_shot_breast_cancer": {
+    "dataset": "sklearn.datasets.load_breast_cancer",
+    "n_train": 426,
+    "n_test": 143,
+    "n_test_evaluated": 137,
+    "n_features": 30,
+    "context_per_pass": 48,
+    "query_per_pass": 16,
+    "bootstraps": 30,
+    "pfn_accuracy": 0.832,
+    "pfn_auc": 0.872,
+    "logreg_accuracy": 0.986,
+    "logreg_auc": 0.998,
+    "majority_baseline": 0.627,
+    "accuracy_gap_vs_logreg": -0.154,
+    "note": "Zero-shot in-context classification. PFN has never seen the dataset; it predicts purely from the 48-sample context in each of 30 bootstrap passes (probabilities averaged per test point). LogReg fits the full 426-sample train fold."
+  },
+  "compute": {
+    "target": "local",
+    "device": "cpu",
+    "cpu_model": "Apple M-series (laptop)",
+    "torch_version": "2.2.2",
+    "python_version": "3.13.5",
+    "numpy_version": "1.26.4"
+  },
+  "reproducibility": {
+    "seeded": true,
+    "note": "Numbers above are byte-identical across reruns on the same machine + same versions. With torch + numpy seeded by hyperparams.seed (42), each `pfnstudio run` of this study produces these exact values. Cross-machine FP noise may shift the final digits but not the headline (zero-shot accuracy ~80-85%, AUC ~0.85-0.90, gap to LogReg ~15 points). See README § Reproducibility."
+  },
+  "notes": [
+    "Headline: zero-shot 83.2% accuracy / AUC 0.87 on a real medical dataset, training only on synthetic random-hyperplane tasks.",
+    "Still 15 percentage points behind LogReg (which fits on the same labelled data). Closing that gap is what richer priors (BNN-generated tasks, SCM mixtures — like TabPFN's actual prior set) buy you. Out of scope for this study.",
+    "Two critical pipeline bugs fixed during this study and one determinism fix added afterward: (1) _default_step + checkpoint walker now find nn.Modules nested as `mod._linear` / `mod.proj`, so embedder + head weights actually train (and persist); (2) train_pfn passes `seed + step*batch_size` to sample_batch instead of `seed + step`, so each task is seen exactly once across training (recency overfitting fixed); (3) train_pfn and the local adapter both call torch.manual_seed early, so same-machine reruns are byte-identical."
+  ]
+}

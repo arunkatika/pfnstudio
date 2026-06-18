@@ -1,0 +1,36 @@
+{
+  "run_id": "linear_regression_bayes_v0_1",
+  "status": "ok",
+  "steps": 2000,
+  "batch_size": 32,
+  "lr": 0.0005,
+  "seed": 42,
+  "training": {
+    "final_loss": 0.0114,
+    "mean_loss_last_10pct": 0.0117,
+    "wall_time_s": 46.6
+  },
+  "eval": {
+    "tasks": 50,
+    "points_per_task": 80,
+    "context_fraction": 0.75,
+    "base_seed": 10000,
+    "pfn_mse": 0.012620,
+    "mean_baseline_mse": 1.137068,
+    "ols_baseline_mse": 0.010271,
+    "ratio_vs_mean": "90.1x better",
+    "ratio_vs_ols": "1.23x worse"
+  },
+  "compute": {
+    "target": "local",
+    "device": "cpu",
+    "cpu_model": "Apple M-series (laptop)",
+    "torch_version": "2.2.2",
+    "python_version": "3.13.5",
+    "numpy_version": "1.26.4"
+  },
+  "reproducibility": {
+    "seeded": true,
+    "note": "Numbers above are byte-identical across reruns on the same machine + same versions. Cross-machine FP noise may shift the final digits but not the headline (1.0–1.5× of OLS, ~90× better than mean). See README § Reproducibility."
+  }
+}

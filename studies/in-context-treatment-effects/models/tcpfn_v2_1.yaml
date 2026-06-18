@@ -1,0 +1,74 @@
+id: tcpfn_v2_1
+name: TCPFN v2.1 — 12-layer cross-attention foundation model
+version: 0.1.0
+description: |
+  The TCPFN v2.1 backbone, expressed in pfnstudio blocks. 12 layers of
+  cross-attention (queries attend to context, queries never attend to
+  each other) with RMSNorm and SiLU-gated FFN, an MLP head projection,
+  and the structured causal-judgment head from v2.1.
+
+  The temporal encoding blocks (short_range_time_encoding) are listed in
+  ``input_blocks`` because they consume batch-metadata tensors
+  (``delta_t``, ``phase``) — they don't fit the default linear chain
+  through ``blocks:``. A custom step_fn calls them on the input side,
+  adds the result to the tabular embedding, then runs the main chain.
+
+  This is a structural reproduction at small scale (d_model=128 instead
+  of 512). Bump the dims back up + train on GPU to reproduce the
+  published v2.1 numbers (Sachs AUROC 0.725).
+
+input_shape: "(B, N, max_num_features)"
+
+input_blocks:
+  - type: short_range_time_encoding
+    name: temporal_encoding
+    config:
+      d_model: 128
+      max_horizon: 100
+
+blocks:
+  - type: tabular_embedder
+    name: x_encoder
+    config:
+      d_model: 128
+  - type: rms_norm
+    name: x_norm
+    config:
+      dim: 128
+  - type: cross_attention_encoder
+    name: transformer
+    config:
+      d_model: 128
+      n_heads: 8
+      n_layers: 12
+      ff_mult: 4
+  - type: mlp
+    name: head_proj
+    config:
+      d_in: 128
+      d_hidden: 512
+      d_out: 128
+      n_layers: 2
+      activation: gelu
+  - type: causal_judgment_head
+    name: judgment
+    config:
+      d_model: 128
+      hidden_dim: 128
+
+output_heads:
+  - name: total_effect
+    task: custom
+  - name: direct_effect
+    task: custom
+  - name: null_probability
+    task: classification
+  - name: confounding_score
+    task: custom
+  - name: identifiability
+    task: classification
+  - name: mediation_fraction
+    task: custom
+  - name: regime
+    task: classification
+

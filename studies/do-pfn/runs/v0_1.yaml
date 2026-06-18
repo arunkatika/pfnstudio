@@ -1,0 +1,30 @@
+id: do_pfn_v0_1
+description: |
+  v0.1 — interventional outcome prediction on Do-PFN's MLP-SCM family.
+  6-layer Do-PFN (d_model=192), 12000 steps, AdamW + grad clip.
+
+  Hyperparams pinned conservatively for a single-GPU reproduction.
+  Upstream's paper-scale runs use much larger model + millions of DGPs;
+  v0.1 ships a single-H100/H200 reproduction that exercises the same
+  CID-prediction mechanism.
+
+prior:
+  id: do_pfn_scm
+  version: 0.1.0
+
+model:
+  id: do_pfn
+  version: 0.1.0
+
+evals:
+  - id: cid_recovery
+    version: 0.1.0
+
+hyperparams:
+  optimizer: adamw
+  lr: 5.0e-4
+  batch_size: 32
+  steps: 12000
+  weight_decay: 1.0e-5
+  clip_grad_norm: 1.0
+  seed: 42

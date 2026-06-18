@@ -1,0 +1,38 @@
+{
+  "status": "ok",
+  "steps": 10000,
+  "final_loss": 0.4393313229084015,
+  "mean_loss_last_10pct": 0.4604721389114857,
+  "wall_time_s": 815.4305648803711,
+  "checkpoint_dir": "<repo-root>/checkpoint",
+  "evals": {
+    "breast_cancer_vs_logreg": {
+      "metrics": {
+        "pfn_accuracy": 0.8321167883211679,
+        "pfn_auc": 0.872183908045977,
+        "logreg_accuracy": 0.986013986013986,
+        "logreg_auc": 0.9976939203354298,
+        "majority_baseline": 0.6267605423927307,
+        "accuracy_gap_vs_logreg": -0.15389719769281818,
+        "pfn_in_distribution_accuracy": 0.77,
+        "pfn_in_distribution_bce": 0.46764125913381577,
+        "pfn_in_distribution_mean_logit_pos": 1.3351650777459145,
+        "pfn_in_distribution_mean_logit_neg": -1.2967640443285928
+      },
+      "meta": {
+        "n_train": 426,
+        "n_test": 143,
+        "n_test_evaluated": 137,
+        "n_features": 30,
+        "context_per_pass": 48,
+        "query_per_pass": 16,
+        "bootstraps": 30,
+        "dataset": "sklearn.datasets.load_breast_cancer",
+        "split": "75/25 stratified, random_state=42",
+        "method": "PFN: bootstrap-averaged in-context probabilities over 30 passes of 48 stratified context + 16 query samples (matches training length). LogReg: trained on the full 426-sample train fold."
+      },
+      "skipped": false,
+      "skip_reason": null
+    }
+  }
+}

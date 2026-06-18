@@ -1,0 +1,43 @@
+id: causal_pfn
+name: Causal PFN (4-layer in-context transformer)
+version: 0.1.0
+description: |
+  4-layer transformer encoder, d_model=128, 4 heads. Embeds the packed
+  (x_1..x_d, t, y_or_0, is_ctx) tokens via a LazyLinear so the input
+  width auto-infers (token width = d + 3 = 13 for d=10).
+
+  Scalar head outputs CATE at every position; the default training step
+  slices logits at n_ctx so loss is computed only at query positions.
+
+  Sized to train in ~12-15 min on a single H100 / H200 for the v0.1
+  hyperparams; smaller than the upstream PerFeatureTransformerPIFM but
+  sufficient to demonstrate in-context CATE recovery.
+
+input_shape: "(B, N, 13)"
+
+blocks:
+  - type: tabular_embedder
+    name: embed
+    config:
+      d_model: 128
+  - type: transformer_encoder
+    name: encoder
+    config:
+      d_model: 128
+      n_heads: 4
+      n_layers: 4
+      ff_mult: 4
+      dropout: 0.0
+  - type: scalar_head
+    name: head
+    config:
+      d_model: 128
+      d_out: 1
+
+output_heads:
+  - name: pred_cate
+    task: regression
+
+citations:
+  - javurek2026csa
+  - mueller2022pfn

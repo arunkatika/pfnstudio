@@ -1,0 +1,35 @@
+id: in_context_treatment_effects_v0_1
+description: |
+  Reference end-to-end run pairing the temporal-treatment-effects prior
+  with the small-scale TCPFN v2.1 model. 1000 steps at batch 8 on CPU is
+  enough to confirm the pipeline holds together; bump to 50k+ steps on
+  GPU + d_model=512 + 12 layers to approach published v2.1 numbers.
+
+  The causal-judgment head returns a dict, so this run expects a
+  custom step_fn — without it, pfnstudio's default step skips because
+  it doesn't know how to compute loss on a dict output. The pipeline
+  validates regardless.
+
+prior:
+  id: temporal_treatment_effects
+  version: 0.1.0
+  overrides:
+    n_context_units: 8
+    n_query_units: 4
+    min_features: 3
+    max_features: 8
+
+model:
+  id: tcpfn_v2_1
+  version: 0.1.0
+
+evals:
+  - id: synthetic_judgment_smoke
+    version: 0.1.0
+
+hyperparams:
+  optimizer: adamw
+  lr: 3.0e-4
+  batch_size: 8
+  steps: 1000
+  seed: 42

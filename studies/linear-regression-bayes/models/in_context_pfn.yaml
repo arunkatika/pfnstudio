@@ -1,0 +1,36 @@
+id: in_context_pfn
+name: 3-layer in-context PFN
+version: 0.1.0
+description: |
+  Small tabular PFN — embeds the packed (x, y_or_0, is_ctx) tokens into
+  d_model=64, runs 3 transformer encoder layers, and projects each
+  position back to a scalar. Loss at query positions only.
+
+  Sized to converge on CPU in ~40 seconds for the linear-regression task.
+
+input_shape: "(B, N, 3)"
+
+blocks:
+  - type: tabular_embedder
+    name: embed
+    config:
+      d_model: 64
+  - type: transformer_encoder
+    name: encoder
+    config:
+      d_model: 64
+      n_heads: 4
+      n_layers: 3
+      dropout: 0.0
+  - type: scalar_head
+    name: head
+    config:
+      d_model: 64
+      d_out: 1
+
+output_heads:
+  - name: pred_y
+    task: regression
+
+citations:
+  - mueller2022pfn

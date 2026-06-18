@@ -1,0 +1,28 @@
+{
+  "status": "ok",
+  "steps": 2000,
+  "final_loss": 0.013719700276851654,
+  "mean_loss_last_10pct": 0.01255793824326247,
+  "wall_time_s": 40.01770877838135,
+  "checkpoint_dir": "<repo-root>/checkpoint",
+  "evals": {
+    "in_context_regression_ols": {
+      "metrics": {
+        "pfn_mse": 0.01261976782232523,
+        "mean_baseline_mse": 1.1370681834220886,
+        "ols_mse": 0.01027119979262352,
+        "ratio_vs_mean": 90.10214763306006,
+        "ratio_vs_ols": 1.2286556660487105
+      },
+      "meta": {
+        "tasks": 50,
+        "points_per_task": 80,
+        "context_fraction": 0.75,
+        "base_seed": 10000,
+        "note": "PFN vs mean vs OLS on tasks drawn fresh from the training prior. OLS is the Bayesian-optimal predictor for a univariate Gaussian-linear prior; a correctly trained in-context PFN should approach it."
+      },
+      "skipped": false,
+      "skip_reason": null
+    }
+  }
+}

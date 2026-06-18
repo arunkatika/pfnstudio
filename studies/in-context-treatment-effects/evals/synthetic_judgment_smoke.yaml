@@ -1,0 +1,23 @@
+id: synthetic_judgment_smoke
+name: Synthetic causal-judgment smoke check
+version: 0.1.0
+task: custom
+description: |
+  Placeholder smoke-eval — confirms the pipeline holds together and
+  the causal-judgment head produces all 8 fields with the right
+  shapes. No accuracy claim. The real benchmark suite for TCPFN v2.1
+  (Sachs AUROC, treatment-effect MSE) is a follow-up port from
+  `tcpfn/benchmarks/`.
+
+  Backed by `pfnstudio_core.scorers.noop.NoOpScorer` at score time
+  (returns a fixed pass/fail based on whether forward succeeded).
+
+dataset:
+  name: synthetic
+  source: "inlined-tcpfn-gpu-temporal-prior"
+  version: "0.1.0"
+  split: "test"
+
+metrics:
+  - name: forward_ok
+    description: 1.0 if the causal-judgment head produces all 8 fields with the expected shapes, else 0.0.

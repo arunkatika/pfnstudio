@@ -1,0 +1,25 @@
+{
+  "id": "linear_regression_bayes_v0_1",
+  "description": "Baseline run \u2014 Bayesian linear regression prior + 3-layer PFN, 2000 steps,\nbatch 32. Reproduces the headline claim of M\u00fcller et al. ICLR 2022: the\ntrained transformer does in-context Bayesian regression in a single forward\npass, beating the mean baseline by ~100\u00d7 and landing within ~1.3\u00d7 of the\nclosed-form OLS solution.\n",
+  "prior": {
+    "id": "bayesian_linear",
+    "version": "0.1.0"
+  },
+  "model": {
+    "id": "in_context_pfn",
+    "version": "0.1.0"
+  },
+  "evals": [
+    {
+      "id": "in_context_regression_ols",
+      "version": "0.1.0"
+    }
+  ],
+  "hyperparams": {
+    "optimizer": "adamw",
+    "lr": 0.0005,
+    "batch_size": 32,
+    "steps": 2000,
+    "seed": 42
+  }
+}

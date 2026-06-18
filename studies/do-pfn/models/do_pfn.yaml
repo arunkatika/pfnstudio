@@ -1,0 +1,42 @@
+id: do_pfn
+name: Do-PFN (6-layer interventional outcome transformer)
+version: 0.1.0
+description: |
+  6-layer transformer encoder, d_model=192, 8 heads. Token width is
+  auto-inferred via LazyLinear inside the tabular_embedder (d_in = d+3
+  = 13 for d=10).
+
+  Architecture matches Do-PFN's paper-stated TabPFN-style backbone at
+  a comfortable mid-size — bigger than v0.1 of causal-sensitivity-pfn
+  (d=128, 4 layers) because the paper's claim about CID prediction
+  benefits from more capacity. Trains in ~25-35 min on a single
+  H100/H200 for the v0.1 hyperparams.
+
+input_shape: "(B, N, 13)"
+
+blocks:
+  - type: tabular_embedder
+    name: embed
+    config:
+      d_model: 192
+  - type: transformer_encoder
+    name: encoder
+    config:
+      d_model: 192
+      n_heads: 8
+      n_layers: 6
+      ff_mult: 4
+      dropout: 0.0
+  - type: scalar_head
+    name: head
+    config:
+      d_model: 192
+      d_out: 1
+
+output_heads:
+  - name: pred_intervention
+    task: regression
+
+citations:
+  - robertson2025dopfn
+  - mueller2022pfn

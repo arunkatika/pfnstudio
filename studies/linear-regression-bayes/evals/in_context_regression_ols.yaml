@@ -1,0 +1,53 @@
+id: in_context_regression_ols
+name: PFN vs mean baseline vs closed-form OLS
+version: 0.1.0
+task: regression
+description: |
+  After training, draw 50 fresh tasks from the same prior the model was
+  trained on, run the model on each one's packed (context, query)
+  sequence, and compare the predicted y's against two baselines:
+
+    - **mean baseline** — predict the context-y mean. What a useless
+      model does.
+    - **OLS** — closed-form linear fit on the context. For a univariate
+      Gaussian-linear prior this is the Bayesian-optimal predictor.
+
+  The headline number is the ratio of PFN MSE to OLS MSE; a correctly
+  trained in-context PFN should land within ~1.5× of OLS.
+
+  This eval is synthetic — no external dataset is loaded. The "data"
+  is fresh draws from the run's own prior. Backed by
+  `pfnstudio_core.scorers.in_context_regression_ols.InContextRegressionVsOLS`.
+
+dataset:
+  name: synthetic-fresh-prior-draws
+  source: ""
+  split: ""
+
+metrics:
+  - name: pfn_mse
+    higher_is_better: false
+    description: PFN MSE on held-out query positions across 50 tasks.
+  - name: mean_baseline_mse
+    higher_is_better: false
+    description: MSE of "predict the context-y mean" — what a useless model does.
+  - name: ols_mse
+    higher_is_better: false
+    description: MSE of closed-form OLS on the context — Bayesian-optimal for this prior.
+  - name: ratio_vs_mean
+    higher_is_better: true
+    description: mean_baseline_mse / pfn_mse — how many times better than mean.
+  - name: ratio_vs_ols
+    higher_is_better: false
+    description: pfn_mse / ols_mse — how close to closed-form Bayes (1.0 = matches).
+
+baselines:
+  - name: mean baseline
+    score: 1.13
+    source: synthetic_prior_draws
+  - name: OLS
+    score: 0.010
+    source: closed_form
+
+citations:
+  - mueller2022pfn
