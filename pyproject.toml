@@ -21,6 +21,7 @@ ignore = [
 # (X, A, K, W, R) by universal convention. `F = torch.nn.functional` is
 # how every PyTorch codebase imports it.
 "priors/**/*.py" = ["N803", "N806", "RUF012"]
+"studies/**/*.py" = ["N803", "N806", "RUF012"]
 "templates/**/*.py" = ["N803", "N806", "RUF012"]
 "tests/**/*.py" = ["N803", "N806", "RUF012", "E402"]
 "examples/**/*.py" = ["N803", "N806"]
@@ -31,6 +32,7 @@ ignore = [
 # wants you to declare CLI parameters. Same for Path.cwd() as a sensible
 # default — re-evaluating per-invocation is the point.
 "packages/cli/pfnstudio/cli.py" = ["B008", "N806"]
+"packages/cli/pfnstudio/runner.py" = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages"]

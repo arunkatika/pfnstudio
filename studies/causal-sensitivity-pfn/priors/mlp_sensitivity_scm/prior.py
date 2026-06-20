@@ -146,8 +146,8 @@ class MlpSensitivitySCMPrior(Prior):
         y_target = cate_p[n_ctx:].astype(np.float32)
 
         return {
-            "X": seq,                # (N, d+3)
-            "y": y_target,           # (n_query,) — CATE at queries
+            "X": seq,  # (N, d+3)
+            "y": y_target,  # (n_query,) — CATE at queries
             "n_ctx": n_ctx,
             "cate_true": cate_p.astype(np.float32),  # full task CATE for eval
             "u_strength": np.float32(u_scale),

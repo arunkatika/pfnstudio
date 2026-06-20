@@ -65,7 +65,9 @@ def _draw_mlp(rng: np.random.Generator, in_dim: int, hidden: int, out_dim: int):
 
 
 def _draw_block_covariance(
-    rng: np.random.Generator, d: int, correlation: float,
+    rng: np.random.Generator,
+    d: int,
+    correlation: float,
 ) -> np.ndarray:
     """Draw a block-diagonal correlation matrix for X.
 
@@ -204,7 +206,7 @@ class DoPfnSCMPrior(Prior):
         q_tokens = np.concatenate(
             [
                 X_p[n_ctx:],
-                t_query_p[n_ctx:, None],         # intervention t the query asks about
+                t_query_p[n_ctx:, None],  # intervention t the query asks about
                 np.zeros((n_q, 1), dtype=np.float32),  # y_obs masked
                 np.zeros((n_q, 1), dtype=np.float32),  # is_ctx = 0
             ],
@@ -215,10 +217,10 @@ class DoPfnSCMPrior(Prior):
         y_target = y_int_p[n_ctx:].astype(np.float32)
 
         return {
-            "X": seq,                                       # (N, d+3)
-            "y": y_target,                                  # (n_query,) interventional Y
+            "X": seq,  # (N, d+3)
+            "y": y_target,  # (n_query,) interventional Y
             "n_ctx": n_ctx,
-            "cate_true": cate_p.astype(np.float32),         # full-task CATE for eval
+            "cate_true": cate_p.astype(np.float32),  # full-task CATE for eval
             "u_strength": np.float32(u_scale),
             "cov_correlation": np.float32(rho),
         }

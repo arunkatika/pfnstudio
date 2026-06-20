@@ -138,7 +138,8 @@ def _capabilities() -> dict[str, Any]:
                 caps["cudaVersion"] = torch.version.cuda
                 caps["gpu"] = torch.cuda.get_device_name(0)
                 caps["gpuMemoryGb"] = round(
-                    torch.cuda.get_device_properties(0).total_memory / (1024 ** 3), 1,
+                    torch.cuda.get_device_properties(0).total_memory / (1024**3),
+                    1,
                 )
             except Exception:
                 # Any of these can raise on weird CUDA setups; capability
@@ -150,7 +151,7 @@ def _capabilities() -> dict[str, Any]:
     # Free disk on the workspace partition (assume $HOME for now).
     try:
         free = shutil.disk_usage(Path.home()).free
-        caps["diskFreeGb"] = round(free / (1024 ** 3), 1)
+        caps["diskFreeGb"] = round(free / (1024**3), 1)
     except OSError:
         pass
     return caps
@@ -210,7 +211,7 @@ def register(
 
     _save_config({"token": token, "cloud_url": cloud_url})
     console.print(f"[green]✓ Registered.[/green] Token saved to [dim]{CONFIG_PATH}[/dim]")
-    console.print(f"[dim]Reported capabilities:[/dim]")
+    console.print("[dim]Reported capabilities:[/dim]")
     for k, v in caps.items():
         console.print(f"  [dim]{k}[/dim] = {v}")
     console.print()
@@ -234,8 +235,7 @@ def doctor() -> None:
     problems: list[str] = []
     if not caps.get("torchVersion"):
         problems.append(
-            "torch not installed. Install with: "
-            "[bold]pip install 'pfnstudio[torch]'[/bold]"
+            "torch not installed. Install with: [bold]pip install 'pfnstudio[torch]'[/bold]"
         )
     if not caps.get("cudaAvailable"):
         problems.append(
@@ -373,9 +373,7 @@ def start(
             break
         if r.status_code >= 500:
             wait = BACKOFF_LADDER_S[min(backoff_idx, len(BACKOFF_LADDER_S) - 1)]
-            console.print(
-                f"[yellow]Cloud returned {r.status_code}; backing off {wait}s[/yellow]"
-            )
+            console.print(f"[yellow]Cloud returned {r.status_code}; backing off {wait}s[/yellow]")
             backoff_idx += 1
             if stop_flag.wait(wait):
                 break
@@ -386,11 +384,8 @@ def start(
 
         data = r.json()
         if data.get("status") == "idle":
-            if (
-                poll_idle_log_every_s > 0
-                and (time.time() - last_idle_log) >= poll_idle_log_every_s
-            ):
-                console.print(f"[dim]· still polling, no jobs queued[/dim]")
+            if poll_idle_log_every_s > 0 and (time.time() - last_idle_log) >= poll_idle_log_every_s:
+                console.print("[dim]· still polling, no jobs queued[/dim]")
                 last_idle_log = time.time()
             continue
 
@@ -419,10 +414,7 @@ def _run_job(
     its JSON events back via /events, post final result."""
     run_id = str(job["runId"])
     run_slug = job.get("runSlug", run_id)
-    console.print(
-        f"\n[bold blue]→ claimed[/bold blue] {run_slug} "
-        f"[dim](run_id={run_id})[/dim]"
-    )
+    console.print(f"\n[bold blue]→ claimed[/bold blue] {run_slug} [dim](run_id={run_id})[/dim]")
 
     # Heartbeat thread keeps the cloud's claim fresh while training runs.
     alive = threading.Event()
@@ -527,9 +519,7 @@ def _run_job(
             if stop_flag.is_set():
                 # User asked the runner to stop; kill this job and
                 # report cancelled.
-                console.print(
-                    "[yellow]Stop requested — terminating in-flight training.[/yellow]"
-                )
+                console.print("[yellow]Stop requested — terminating in-flight training.[/yellow]")
                 try:
                     proc.terminate()
                 except ProcessLookupError:
