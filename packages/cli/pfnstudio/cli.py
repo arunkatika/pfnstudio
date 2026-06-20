@@ -12,12 +12,13 @@ from rich.table import Table
 from . import __version__
 from .compute import ADAPTERS, get_adapter
 from .lint import lint_project
+from .runner import runner_app
 from .scaffold import scaffold_project
 from .tracking import select_trackers
 from .validate import validate_project
 
 app = typer.Typer(
-    name="priorstudio",
+    name="pfnstudio",
     help="Build, validate, and run prior-fitted foundation model projects.",
     no_args_is_help=True,
 )
@@ -32,13 +33,17 @@ author_app = typer.Typer(
 )
 app.add_typer(author_app, name="author")
 
+# Self-hosted runner: this machine pulls jobs from PFN Studio cloud and
+# trains them locally. Mirrors GitHub Actions' self-hosted runner.
+app.add_typer(runner_app, name="runner")
+
 console = Console()
 
 
 @app.command()
 def version() -> None:
     """Print the CLI version."""
-    console.print(f"priorstudio {__version__}")
+    console.print(f"pfnstudio {__version__}")
 
 
 @app.command()

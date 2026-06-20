@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pre-build sync — copies the repo-root schemas/ and templates/ into
-# packages/cli/priorstudio/_bundled/ so they're inside the package
+# packages/cli/pfnstudio/_bundled/ so they're inside the package
 # tree at `python -m build` time. The CLI's `validate` and `init`
 # commands read from this _bundled path at runtime.
 #
@@ -15,7 +15,7 @@ set -euo pipefail
 
 PKG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$PKG_DIR/../.." && pwd)"
-BUNDLED="$PKG_DIR/priorstudio/_bundled"
+BUNDLED="$PKG_DIR/pfnstudio/_bundled"
 
 mkdir -p "$BUNDLED"
 
@@ -26,5 +26,5 @@ for src in schemas templates; do
   fi
   rm -rf "$BUNDLED/$src"
   cp -R "$REPO_ROOT/$src" "$BUNDLED/$src"
-  echo "✓ Synced $src/ → priorstudio/_bundled/$src/"
+  echo "✓ Synced $src/ → pfnstudio/_bundled/$src/"
 done
