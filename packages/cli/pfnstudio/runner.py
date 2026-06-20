@@ -9,32 +9,31 @@ Wire protocol:
 
   POST /runner/capabilities                  on startup: report torch/CUDA/disk
   GET  /runner/jobs/next                     long-poll for next claimable job
+  GET  /runner/jobs/:runId/bundle            tar.gz of the project source
   POST /runner/jobs/:runId/heartbeat         every HEARTBEAT_S seconds
+  POST /runner/jobs/:runId/events            stream JSON events as they happen
   POST /runner/jobs/:runId/result            final upload (status + events)
 
 Auth header: ``Authorization: Token psr_<48-hex>``. Token issued exactly
 once when a user clicks "Add a runner" in /settings/runners; stored at
 ``~/.pfnstudio/runner.json`` with chmod 0600.
 
-Phase 2 scope (this file):
+Scope of this module:
   * register / doctor / start subcommands
   * Long-poll loop with SIGINT / SIGTERM graceful shutdown
   * Per-job heartbeat thread
-  * Subprocess execution via ``pfnstudio run``, with JSON-event piping
-    back to the cloud as Run.events
+  * Per-job bundle download → extract to a temp dir → subprocess
+    ``pfnstudio run`` in it → tear down the temp dir on exit
+  * JSON-event piping back to the cloud as Run.events
 
-Out of scope for Phase 2 (will land in 2.5):
-  * Bundle download (``GET /runner/jobs/:id/bundle``) for jobs whose
-    project isn't already on this runner's disk. Today the runner
-    assumes ``--project-root`` (default: CWD) contains the project the
-    job references. Works for the developer-on-own-machine flow; not
-    yet for "studio dispatches a job to my laptop blindly".
+Still out of scope:
   * Per-job venv isolation (we run in the runner's own Python env).
   * Docker executor mode.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import platform
@@ -43,6 +42,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -288,9 +288,11 @@ def start(
         Path.cwd(),
         "--project-root",
         help=(
-            "Directory containing the project the runner trains. Currently "
-            "the runner doesn't fetch projects from the cloud (Phase 2.5); "
-            "it runs against whatever's at this path. Default: current dir."
+            "Fallback project root, used only when the cloud's per-job "
+            "bundle endpoint isn't available (older cloud, network "
+            "issue). Normally the runner fetches the project as a "
+            "tar.gz per job and extracts to a temp dir, so this is "
+            "rarely consulted. Default: current dir."
         ),
     ),
     poll_idle_log_every_s: int = typer.Option(
@@ -403,6 +405,101 @@ def start(
 # ── Job execution ────────────────────────────────────────────────────
 
 
+def _materialize_job_workspace(
+    base: str,
+    headers: dict[str, str],
+    run_id: str,
+    run_slug: str,
+    job: dict[str, Any],
+    fallback_project_root: Path,
+) -> tuple[Path | None, Path, str]:
+    """Return (bundle_dir_to_cleanup, work_root, run_yaml_rel_path).
+
+    Two paths in priority order:
+
+    1. **Bundle download (default).** Fetch ``GET /runner/jobs/<id>/bundle``
+       and extract its tar.gz into a fresh temp dir. The bundle contains
+       the full project tree the trainer needs (priors/, models/, evals/,
+       runs/<slug>.yaml). work_root = the temp dir, run_yaml_rel =
+       ``runs/<slug>.yaml``. bundle_dir_to_cleanup = the temp dir so the
+       caller can rmtree it on exit.
+
+    2. **Fallback to --project-root.** If the cloud returns 404 (older
+       cloud without the bundle endpoint) or download fails, write the
+       job's spec dict to a temp run.yaml inside the operator's
+       --project-root and run there. work_root = fallback_project_root,
+       run_yaml_rel = ``<tmpname>.yaml``. bundle_dir_to_cleanup = None.
+
+    Network errors (timeout, 5xx) raise so the caller can mark the job
+    failed with a clear message. Only 404 falls through silently —
+    that's the "older cloud" case where the fallback is expected.
+    """
+    try:
+        resp = requests.get(
+            f"{base}/runner/jobs/{run_id}/bundle",
+            headers=headers,
+            timeout=120,
+            stream=True,
+        )
+    except requests.RequestException as e:
+        raise RuntimeError(f"bundle download failed: {e}") from e
+
+    if resp.status_code == 404:
+        # Older cloud without the bundle endpoint OR job already
+        # released. Fall back to operator-supplied project_root.
+        console.print(
+            "[dim]Bundle endpoint not available — falling back to "
+            f"--project-root ({fallback_project_root}). Update the "
+            "cloud for bundle download support.[/dim]"
+        )
+        spec = {
+            "id": run_slug,
+            "prior": job.get("priorRef") or {},
+            "model": job.get("modelRef") or {},
+            "evals": job.get("evalRefs") or [],
+            "hyperparams": job.get("hyperparams") or {},
+            "compute": {"target": "local"},
+        }
+        with tempfile.NamedTemporaryFile(
+            "w",
+            suffix=f"-{run_slug}.yaml",
+            delete=False,
+            dir=str(fallback_project_root),
+        ) as f:
+            yaml.safe_dump(spec, f)
+            tmp_yaml = Path(f.name)
+        return None, fallback_project_root, tmp_yaml.name
+
+    if not resp.ok:
+        raise RuntimeError(f"bundle download returned {resp.status_code}: {resp.text[:200]}")
+
+    # Stream the tar.gz body into memory then extract. Project bundles
+    # are small (YAML + Python source, no datasets), so we don't bother
+    # spooling to disk first.
+    bundle_dir = Path(tempfile.mkdtemp(prefix=f"pfnstudio-runner-{run_slug}-"))
+    try:
+        buf = io.BytesIO(resp.content)
+        with tarfile.open(fileobj=buf, mode="r:gz") as tar:
+            # filter='data' refuses absolute paths, symlinks, and
+            # parent-relative escapes — defense against a malicious
+            # archive (Python 3.12+; older versions fall back to
+            # default behavior with a warning).
+            try:
+                tar.extractall(path=bundle_dir, filter="data")
+            except TypeError:
+                tar.extractall(path=bundle_dir)
+    except (tarfile.TarError, OSError) as e:
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+        raise RuntimeError(f"bundle extract failed: {e}") from e
+
+    run_yaml_rel = f"runs/{run_slug}.yaml"
+    if not (bundle_dir / run_yaml_rel).exists():
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+        raise RuntimeError(f"bundle is missing {run_yaml_rel} — cloud sent an incomplete bundle.")
+    console.print(f"[dim]Bundle extracted to {bundle_dir}[/dim]")
+    return bundle_dir, bundle_dir, run_yaml_rel
+
+
 def _run_job(
     base: str,
     headers: dict[str, str],
@@ -444,25 +541,22 @@ def _run_job(
     final_status = "failed"
     final_error: dict[str, Any] | None = None
     proc: subprocess.Popen[str] | None = None
+    bundle_dir: Path | None = None
+    tmp_yaml: Path | None = None
 
     try:
-        # Materialise the job's spec as a temp run.yaml. The local
-        # adapter (run via the same CLI subprocess) reads that file.
-        spec = {
-            "id": run_slug,
-            "prior": job.get("priorRef") or {},
-            "model": job.get("modelRef") or {},
-            "evals": job.get("evalRefs") or [],
-            "hyperparams": job.get("hyperparams") or {},
-            # Force local target so the dispatcher doesn't bounce back
-            # to cloud — we're already on the runner's machine.
-            "compute": {"target": "local"},
-        }
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=f"-{run_slug}.yaml", delete=False, dir=str(project_root)
-        ) as f:
-            yaml.safe_dump(spec, f)
-            tmp_yaml = Path(f.name)
+        # Resolve which directory the trainer will run from. Bundle
+        # download is the modern path (cloud streams the project
+        # source per job); fallback to operator's --project-root if
+        # the cloud lacks the endpoint or the download fails. Either
+        # way the subprocess CWD is `work_root`.
+        bundle_dir, work_root, run_yaml_rel = _materialize_job_workspace(
+            base, headers, run_id, run_slug, job, project_root
+        )
+        # tmp_yaml is only set in the fallback path; tracked here so
+        # finally: cleanup knows what to unlink.
+        if bundle_dir is None:
+            tmp_yaml = work_root / run_yaml_rel
 
         # PFNSTUDIO_JSON_PROGRESS=1 tells the local adapter to emit
         # JSON-line events on stdout, which we pipe up to /events.
@@ -475,11 +569,11 @@ def _run_job(
                 "-m",
                 "pfnstudio",
                 "run",
-                str(tmp_yaml),
+                run_yaml_rel,
                 "--target",
                 "local",
             ],
-            cwd=str(project_root),
+            cwd=str(work_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=env,
@@ -546,11 +640,21 @@ def _run_job(
 
     finally:
         alive.clear()
-        # Best-effort cleanup of the temp run.yaml.
-        try:
-            tmp_yaml.unlink(missing_ok=True)  # type: ignore[possibly-undefined]
-        except Exception:
-            pass
+        # Best-effort cleanup. Two cases:
+        #   - bundle path: nuke the whole temp extract dir
+        #   - fallback path: just unlink the temp run.yaml we wrote
+        #     inside the operator's --project-root (don't touch the
+        #     operator's project files).
+        if bundle_dir is not None:
+            try:
+                shutil.rmtree(bundle_dir, ignore_errors=True)
+            except Exception:
+                pass
+        elif tmp_yaml is not None:
+            try:
+                tmp_yaml.unlink(missing_ok=True)
+            except Exception:
+                pass
 
         # Post the final state. Retry once on transient errors — losing
         # this report would leave the cloud with the run stuck in
