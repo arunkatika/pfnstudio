@@ -313,12 +313,25 @@ def start(
     base = cfg["cloud_url"]
     headers = {"Authorization": f"Token {cfg['token']}"}
 
+    caps = _capabilities()
+    # Warn loudly at startup if torch isn't installed — every job will
+    # otherwise come back "skipped: tabular_embedder requires torch" and
+    # the operator has to dig through the cloud's run page to find out
+    # why. Don't refuse to start (operator may be debugging the runner's
+    # plumbing without intending to train).
+    if not caps.get("torchVersion"):
+        console.print(
+            "[bold yellow]⚠ torch is not installed.[/bold yellow] Every "
+            "training job will skip until you install it.\n"
+            "  Fix: [bold]pip install -U 'pfnstudio[runner]'[/bold]"
+        )
+
     # Bump capabilities on start so a runner that was offline for a
     # week and just got an OS update reports the new state.
     try:
         requests.post(
             f"{base}/runner/capabilities",
-            json={"capabilities": _capabilities()},
+            json={"capabilities": caps},
             headers=headers,
             timeout=15,
         )

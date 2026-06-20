@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pfnstudio"
-version = "0.8.2"
+version = "0.8.3"
 description = "CLI for the PFN Studio framework — scaffold, validate, lint, and run prior-fitted foundation model projects."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,6 +28,13 @@ dependencies = [
 
 [project.optional-dependencies]
 torch = ["pfnstudio-core[torch]"]
+# `runner` is the "I want to long-poll the cloud and execute training
+# jobs on this machine" install. Without torch every job ends with
+# "tabular_embedder requires torch", so we ship it as a non-optional
+# part of the runner extra rather than telling operators to pip-install
+# two things. The runner-creation modal + share link both tell users
+# to `pip install -U "pfnstudio[runner]"`.
+runner = ["pfnstudio-core[torch]"]
 wandb = ["wandb>=0.16"]
 mlflow = ["mlflow>=2.10"]
 modal = ["modal>=0.62"]
