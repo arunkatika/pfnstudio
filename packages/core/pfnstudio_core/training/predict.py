@@ -26,9 +26,218 @@ contract and should be the one to surface a clear failure.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
+
+
+def _checkpoint_d_in(checkpoint_dir: Path) -> int | None:
+    """Read persisted tabular width from topology.json (newer checkpoints)."""
+    topo = checkpoint_dir / "topology.json"
+    if not topo.is_file():
+        return None
+    try:
+        data = json.loads(topo.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    d = data.get("d_in")
+    return int(d) if isinstance(d, int) and d > 0 else None
+
+
+def _block_nn_modules(b: Any) -> list:
+    """Walk a block to find every torch.nn.Module sub-module attached to it.
+
+    Different blocks expose their nn.Module under different attr names
+    (``module``, ``_linear``, ...). Hard-coding ``.module`` broke
+    TabularEmbedder (its module is ``._linear``), surfacing as
+    ``AttributeError: 'TabularEmbedder' object has no attribute
+    'load_state_dict'``. Walking ``vars()`` finds every nn.Module inside
+    the block; ``load_state_dict(strict=False)`` then matches whatever
+    keys belong to each.
+    """
+    import torch.nn as _nn
+
+    if isinstance(b, _nn.Module):
+        return [b]
+    seen: list = []
+    attached = getattr(b, "module", None)
+    if isinstance(attached, _nn.Module):
+        seen.append(attached)
+    for v in vars(b).values():
+        if isinstance(v, _nn.Module) and v not in seen:
+            seen.append(v)
+    return seen
+
+
+class ModelLoader:
+    """Hold a trained PFN checkpoint in memory, ready to serve many
+    ``predict()`` calls without re-reading the run / model yaml /
+    weights from disk on every call.
+
+    Two usage patterns:
+
+    1. **One-shot** (the existing ``/runs/:id/predict`` path) — used as
+       a context manager so sys.path mutation is cleaned up::
+
+           with ModelLoader(
+               manifest_path=…, project_root=…, checkpoint_dir=…
+           ) as loader:
+               result = loader.predict(payload, tag=tag, detect=False)
+
+    2. **Long-lived** (the forthcoming ``pfnstudio serve`` worker, Phase 1)
+       — instantiate once at process start, call ``predict`` per request,
+       call ``close()`` at shutdown::
+
+           loader = ModelLoader(...)
+           try:
+               for req in incoming:
+                   yield loader.predict(req.payload, tag=req.tag)
+           finally:
+               loader.close()
+
+    The class owns ``sys.path`` mutation for the duration of its life —
+    the project root has to stay importable for the prior/model classes
+    to resolve. ``close()`` removes the entry; ``__init__`` cleans up on
+    construction failure as well, so a half-built loader can't leak path
+    state.
+    """
+
+    def __init__(
+        self,
+        *,
+        manifest_path: Path,
+        project_root: Path,
+        checkpoint_dir: Path,
+    ) -> None:
+        import torch
+
+        from pfnstudio_core.loaders import load_model, load_run
+        from pfnstudio_core.model import Model
+        from pfnstudio_core.registry import discover_in_project
+
+        from .loop import _model_tabular_d_in
+
+        # Same project bootstrap as the local trainer adapter.
+        self._project_root_str: str | None = str(project_root)
+        sys.path.insert(0, self._project_root_str)
+
+        # If anything below raises, restore sys.path before propagating —
+        # otherwise the caller's interpreter is left with the project
+        # root permanently on the path.
+        try:
+            discover_in_project(project_root)
+            self.run = load_run(manifest_path)
+
+            model_yaml = project_root / "models" / f"{self.run.model.id}.yaml"
+            if not model_yaml.exists():
+                raise FileNotFoundError(f"model.yaml not found at {model_yaml}")
+            model_spec = load_model(model_yaml)
+            self.model = Model(model_spec)
+
+            # Restore weights. Trainer wrote a flat dict keyed by
+            # "<block_name>.<param>"; redistribute back to each block's
+            # state_dict so blocks added/reordered since training still
+            # bind correctly.
+            ckpt_path = checkpoint_dir / "model.pt"
+            if not ckpt_path.exists():
+                raise FileNotFoundError(f"checkpoint not found at {ckpt_path}")
+            flat = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+
+            for name, mod in getattr(self.model, "modules", []):
+                sd = {k[len(name) + 1 :]: v for k, v in flat.items() if k.startswith(name + ".")}
+                if not sd:
+                    continue
+                for sub in _block_nn_modules(mod):
+                    # strict=False ignores keys that don't belong to this
+                    # sub-module — supports blocks with multiple nn.Modules.
+                    sub.load_state_dict(sd, strict=False)
+                    sub.eval()
+
+            # Tabular embedder width (packed-token d_in), not an
+            # arbitrary encoder weight matrix — scanning the first 2-D
+            # weight picks d_model and breaks for some prior+model
+            # combinations whose first weight isn't the input projection.
+            d_in: int | None = _model_tabular_d_in(self.model)
+            if d_in is None:
+                d_in = _checkpoint_d_in(checkpoint_dir)
+            self.d_in: int | None = d_in
+            self.checkpoint_dir: Path = checkpoint_dir
+        except BaseException:
+            self.close()
+            raise
+
+    def predict(
+        self,
+        payload: dict,
+        *,
+        tag: dict[str, Any] | None = None,
+        detect: bool = False,
+    ) -> dict:
+        """Run one forward pass on the loaded model.
+
+        ``tag`` (optional) is a dict ``{axis_name: value}`` for promptable
+        priors. When the prior declares axes and tag is provided, the
+        tag is encoded into a fixed-length vector and routed to any
+        tag-aware block in the model. Brains trained without
+        ``promptable_training`` silently ignore the tag.
+
+        ``detect`` (optional, default False) — when True and the run's
+        checkpoint dir contains a ``detector.pt`` from a companion-trained
+        AxisDetector, the predict response includes a ``detected_tag``
+        field with the detector's per-axis proposal + confidence.
+
+        Raises on payload shape mismatches; callers (the CLI predict
+        command, the ``/runs/:id/predict`` endpoint, the forthcoming
+        worker process) wrap into their preferred error envelope.
+        """
+        if self.d_in is not None:
+            _validate_input_dim(payload, self.d_in)
+
+        # Resolve tag → encoded tensor lazily. We need the prior's
+        # declared axes; look them up via the registry. If the prior
+        # has no axes (or tag is None) we skip the encoding and the
+        # dispatch helpers run their non-tag path.
+        tag_tensor = _resolve_tag_tensor(self.run, tag)
+
+        out = _dispatch_inference(
+            self.model, payload, expected_d_in=self.d_in, tag_tensor=tag_tensor
+        )
+
+        # Auto-detector proposal — only if the caller asked for it
+        # AND the run's checkpoint actually ships a detector. The
+        # response gets a ``detected_tag`` field shaped as
+        # ``{axis_name: {value, confidence, probs}}``.
+        if detect:
+            try:
+                detected = _run_detector(
+                    run=self.run,
+                    checkpoint_dir=self.checkpoint_dir,
+                    payload=payload,
+                    expected_d_in=self.d_in,
+                )
+                if detected:
+                    out["detected_tag"] = detected
+            except Exception as e:  # pragma: no cover — defensive
+                out["detect_warning"] = f"{type(e).__name__}: {e}"
+
+        return out
+
+    def close(self) -> None:
+        """Remove this loader's project root from ``sys.path``. Idempotent —
+        safe to call twice (no-ops the second time) and from ``__init__``
+        failure paths where the entry may or may not have been inserted.
+        """
+        root = getattr(self, "_project_root_str", None)
+        if root and root in sys.path:
+            sys.path.remove(root)
+        self._project_root_str = None
+
+    def __enter__(self) -> "ModelLoader":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
 
 
 def run_inference(
@@ -40,131 +249,20 @@ def run_inference(
     tag: dict[str, Any] | None = None,
     detect: bool = False,
 ) -> dict:
-    """Load the run's model + checkpoint and run one forward pass.
+    """One-shot load + predict + close. Back-compat entry point.
 
-    ``tag`` (optional) is a dict ``{axis_name: value}`` for promptable
-    priors. When the prior declares axes and tag is provided, the tag
-    is encoded into a fixed-length vector and routed to any tag-aware
-    block in the model. Brains trained without promptable_training
-    silently ignore the tag (no tag_embedder → no tag pathway).
-
-    ``detect`` (optional, default False) — when True and the run's
-    checkpoint dir contains a ``detector.pt`` from a companion-trained
-    AxisDetector, the predict response includes a ``detected_tag``
-    field with the detector's per-axis proposal + confidence. Lets
-    the UI pre-fill chips on the Brain page.
-
-    Raises on missing files / unloadable state_dict / unrecognised
-    payload shape; the CLI wraps the call so all failures land in a
-    ``{"error": "..."}`` JSON output.
+    Kept as the call site for the existing ``/runs/:id/predict`` route
+    and the CLI ``predict`` command — they pay the small re-load cost
+    on every call. Long-lived serving paths (the ``pfnstudio serve``
+    worker, which holds one checkpoint in memory across many predict
+    requests) instantiate :class:`ModelLoader` directly and reuse it.
     """
-    import torch
-
-    from pfnstudio_core.loaders import load_model, load_run
-    from pfnstudio_core.model import Model
-    from pfnstudio_core.registry import discover_in_project
-
-    # Same project bootstrap as the local trainer adapter.
-    sys.path.insert(0, str(project_root))
-    try:
-        discover_in_project(project_root)
-        run = load_run(manifest_path)
-
-        model_yaml = project_root / "models" / f"{run.model.id}.yaml"
-        if not model_yaml.exists():
-            raise FileNotFoundError(f"model.yaml not found at {model_yaml}")
-        model_spec = load_model(model_yaml)
-        model = Model(model_spec)
-
-        # Restore weights. Trainer wrote a flat dict keyed by
-        # "<block_name>.<param>"; redistribute back to each block's
-        # state_dict so blocks added/reordered since training still
-        # bind correctly.
-        ckpt_path = checkpoint_dir / "model.pt"
-        if not ckpt_path.exists():
-            raise FileNotFoundError(f"checkpoint not found at {ckpt_path}")
-        flat = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-
-        # Mirror the trainer's _block_nn_modules walk — different
-        # blocks expose their torch.nn.Module under different attr
-        # names (`module`, `_linear`, ...). Hard-coding `.module`
-        # broke TabularEmbedder (its module is `._linear`), surfacing
-        # as `AttributeError: 'TabularEmbedder' object has no
-        # attribute 'load_state_dict'`. Walking vars() finds every
-        # nn.Module inside the block; load_state_dict(strict=False)
-        # then matches whatever keys belong to each.
-        import torch.nn as _nn
-
-        def _block_nn_modules(b):
-            if isinstance(b, _nn.Module):
-                return [b]
-            seen = []
-            attached = getattr(b, "module", None)
-            if isinstance(attached, _nn.Module):
-                seen.append(attached)
-            for v in vars(b).values():
-                if isinstance(v, _nn.Module) and v not in seen:
-                    seen.append(v)
-            return seen
-
-        for name, mod in getattr(model, "modules", []):
-            sd = {k[len(name) + 1 :]: v for k, v in flat.items() if k.startswith(name + ".")}
-            if not sd:
-                continue
-            for sub in _block_nn_modules(mod):
-                # strict=False ignores keys that don't belong to this
-                # sub-module — supports blocks with multiple nn.Modules.
-                sub.load_state_dict(sd, strict=False)
-                sub.eval()
-
-        # Detect the model's expected input dimensionality from the
-        # first block that has a 2-D `weight` tensor. For a TabularEmbedder
-        # whose `_linear` is Linear(32, 256), weight.shape is (256, 32) →
-        # d_in = 32. Used to validate the payload before forwarding,
-        # so a 1-D input against a 32-D model raises a clear actionable
-        # error instead of a generic LazyLinear AssertionError deep in
-        # the forward pass.
-        d_in: int | None = None
-        for _, mod in getattr(model, "modules", []):
-            if d_in is not None:
-                break
-            for sub in _block_nn_modules(mod):
-                w = getattr(sub, "weight", None)
-                if w is not None and hasattr(w, "shape") and len(w.shape) >= 2:
-                    d_in = int(w.shape[-1])
-                    break
-        if d_in is not None:
-            _validate_input_dim(payload, d_in)
-
-        # Resolve tag → encoded tensor lazily. We need the prior's
-        # declared axes to do this; look them up via the registry.
-        # If the prior has no axes (or tag is None) we skip the
-        # encoding and the dispatch helpers run their non-tag path.
-        tag_tensor = _resolve_tag_tensor(run, tag)
-
-        out = _dispatch_inference(model, payload, expected_d_in=d_in, tag_tensor=tag_tensor)
-
-        # Auto-detector proposal — only if the caller asked for it
-        # AND the run's checkpoint actually ships a detector. The
-        # response payload gets a ``detected_tag`` field shaped as
-        # ``{axis_name: {value, confidence, probs}}``.
-        if detect:
-            try:
-                detected = _run_detector(
-                    run=run,
-                    checkpoint_dir=checkpoint_dir,
-                    payload=payload,
-                    expected_d_in=d_in,
-                )
-                if detected:
-                    out["detected_tag"] = detected
-            except Exception as e:  # pragma: no cover — defensive
-                out["detect_warning"] = f"{type(e).__name__}: {e}"
-
-        return out
-    finally:
-        if str(project_root) in sys.path:
-            sys.path.remove(str(project_root))
+    with ModelLoader(
+        manifest_path=manifest_path,
+        project_root=project_root,
+        checkpoint_dir=checkpoint_dir,
+    ) as loader:
+        return loader.predict(payload, tag=tag, detect=detect)
 
 
 def _run_detector(
@@ -342,11 +440,10 @@ def _forward_encoder_and_pick_head(
 
     Mirrors the trainer's `_split_encoder_heads` + per-branch shape
     pick in pfnstudio_core.training.loop. Without this split,
-    multi-head models (e.g. a wizard brain whose user picked both
-    `number` and `classification` skills, which both append
-    `scalar_head` blocks) crash at the second head — the first
-    head's `(..., 1)` output is fed to a `Linear(64, 1)` that
-    expects `(..., 64)`.
+    multi-head models (e.g. a model with both regression and
+    classification heads, which both append `scalar_head` blocks)
+    crash at the second head — the first head's `(..., 1)` output is
+    fed to a `Linear(64, 1)` that expects `(..., 64)`.
 
     When ``tag_tensor`` is provided, it's tiled to the input's batch
     size and routed to any encoder block exposing a non-None
@@ -374,7 +471,7 @@ def _forward_encoder_and_pick_head(
         if tuple(ho.shape[-len(expected_shape_tail) :]) == tuple(expected_shape_tail):
             return ho
     # No exact match — first head is the best guess (caller can
-    # decide whether to surface it). Most single-head brains land here.
+    # decide whether to surface it). Most single-head models land here.
     return head_outputs[0] if head_outputs else None
 
 
@@ -434,7 +531,7 @@ def _forward_full_sequence(model: Any, seq: Any, tag_tensor: Any = None) -> Any:
 
     Mirrors the training-time forward pass: encoder once, then each
     head on the encoder output (single-head models are the common case;
-    multi-head brains pick the first head whose trailing dim is 1).
+    multi-head models pick the first head whose trailing dim is 1).
 
     When ``tag_tensor`` is provided, it's tiled to the input's batch
     size and routed to any encoder block exposing a non-None
@@ -480,12 +577,14 @@ def _dispatch_inference(
 
     `expected_d_in`: the model's actual in_features (from its weight
     matrix). When the payload's per-token width already equals
-    `expected_d_in` we skip _pack_context_query — those brains were
-    trained un-packed (e.g. forecast brains whose prior emits the full
+    `expected_d_in` we skip _pack_context_query — those models were
+    trained un-packed (e.g. forecast priors that emit the full
     engineered-feature row directly) and double-packing would crash
-    the model. Falls back to the packed path when expected_d_in is
-    unknown (older runs missing the d_in result) or when the payload
-    width is `expected_d_in - 2` (the canonical packed convention).
+    the model.     Uses the packed path only when the payload width is
+    `expected_d_in - 2` (the canonical packed convention). When width
+    already equals `expected_d_in`, rows are concatenated un-packed.
+    When expected_d_in is unknown, un-packed is assumed if width matches
+    the model embedder (see _checkpoint_d_in / topology.json).
     """
     import numpy as np
     import torch
@@ -502,7 +601,9 @@ def _dispatch_inference(
         if x_qry.ndim == 1:
             x_qry = x_qry.reshape(-1, 1)
 
-        packed_input = expected_d_in is None or int(x_ctx.shape[-1]) + 2 == expected_d_in
+        packed_input = (
+            expected_d_in is not None and int(x_ctx.shape[-1]) + 2 == expected_d_in
+        )
         if packed_input:
             seq = _pack_context_query(x_ctx, lbl_ctx, x_qry)
         else:
@@ -543,11 +644,13 @@ def _dispatch_inference(
         if x_qry.ndim == 1:
             x_qry = x_qry.reshape(-1, 1)
 
-        packed_input = expected_d_in is None or int(x_ctx.shape[-1]) + 2 == expected_d_in
+        packed_input = (
+            expected_d_in is not None and int(x_ctx.shape[-1]) + 2 == expected_d_in
+        )
         if packed_input:
             seq = _pack_context_query(x_ctx, y_ctx, x_qry)
         else:
-            # Un-packed regime — forecast brains (ar2, tabpfn-ts) train
+            # Un-packed regime — forecast models (ar2, tabpfn-ts) train
             # on the prior's engineered rows directly; the trainer's
             # regression branch forwards the full sequence without adding
             # marker columns. Mirror that here so the predict path

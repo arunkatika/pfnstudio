@@ -33,7 +33,7 @@ from .registry import (
 )
 from .run import Run, RunSpec
 
-__version__ = "0.4.0"
+__version__ = "0.8.0"
 
 __all__ = [
     "UNKNOWN",

@@ -777,6 +777,61 @@ def run(
 
 
 @app.command()
+def serve(
+    manifest: Path = typer.Argument(..., help="Path to a run YAML."),
+    checkpoint: Path = typer.Option(
+        ..., help="Path to the checkpoint directory (contains model.pt + topology.json)."
+    ),
+    project: Path = typer.Option(None, help="Project root (default: parent of runs/)."),
+    host: str = typer.Option(
+        "127.0.0.1",
+        help="Bind address. Defaults to loopback — typically only the spawning process is the client.",
+    ),
+    port: int = typer.Option(
+        0,
+        help='TCP port to bind. 0 lets the OS pick a free port; the actual port is emitted in the {"event":"ready"} stdout line.',
+    ),
+) -> None:
+    """Load a trained checkpoint once and serve predictions over HTTP.
+
+    The self-hosted runner spawns one of these per Deployment, watches
+    stdout for the structured event stream
+    (``{"event":"starting"|"ready"|"error"|"shutdown",...}``), and
+    forwards predict calls to ``POST /predict`` on the reported port.
+
+    Endpoints:
+      - GET  /healthz → ``{"status":"ready"}``
+      - POST /predict → same JSON shape as the ``predict`` subcommand
+
+    Blocks until SIGTERM/SIGINT; emits a final shutdown event and
+    exits cleanly. A loader failure exits with code 1 after emitting
+    ``{"event":"error","stage":"load",...}``.
+    """
+    import sys as _sys
+
+    manifest = manifest.resolve()
+    if project is None:
+        project = manifest.parent.parent if manifest.parent.name == "runs" else Path.cwd()
+    project = project.resolve()
+
+    # Lazy import — keeps torch / serving deps out of the lightweight
+    # CLI commands' import path (init / validate / lint).
+    try:
+        from pfnstudio_core.serving import serve as _serve
+    except ImportError as e:
+        _sys.stderr.write(f"serving module unavailable: {e}\n")
+        raise typer.Exit(code=1) from e
+
+    _serve(
+        manifest_path=manifest,
+        project_root=project,
+        checkpoint_dir=checkpoint.resolve(),
+        host=host,
+        port=port,
+    )
+
+
+@app.command()
 def predict(
     manifest: Path = typer.Argument(..., help="Path to a run YAML."),
     checkpoint: Path = typer.Option(

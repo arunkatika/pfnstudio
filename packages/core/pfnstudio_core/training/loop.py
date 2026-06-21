@@ -99,6 +99,27 @@ def _split_encoder_heads(modules: list[tuple[str, Any]]) -> tuple[list[Any], lis
     return encoder, heads
 
 
+def _model_tabular_d_in(model: Any) -> int | None:
+    """Input width from a tabular embedder's ``_linear.in_features``.
+
+    Only inspects blocks whose class name is ``TabularEmbedder``.
+    Other blocks (e.g. an MLP) also expose a ``d_in`` attribute for
+    *their* internal width — scanning those produced false positives
+    in some model topologies.
+    """
+    widths: list[int] = []
+    for _, mod in getattr(model, "modules", []):
+        if type(mod).__name__ != "TabularEmbedder":
+            continue
+        linear = getattr(mod, "_linear", None)
+        if linear is None:
+            continue
+        in_features = getattr(linear, "in_features", None)
+        if in_features is not None and int(in_features) > 0:
+            widths.append(int(in_features))
+    return min(widths) if widths else None
+
+
 def _default_step(model: Any, batch: list[dict], hp: dict) -> Any:
     """Default step. Auto-detects the prior's task by inspecting batch
     keys and picks an appropriate loss:
