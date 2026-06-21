@@ -9,10 +9,12 @@ Wire protocol:
 
   POST /runner/capabilities                  on startup: report torch/CUDA/disk
   GET  /runner/jobs/next                     long-poll for next claimable job
+                                             (+ pendingPublishes piggybacked)
   GET  /runner/jobs/:runId/bundle            tar.gz of the project source
   POST /runner/jobs/:runId/heartbeat         every HEARTBEAT_S seconds
   POST /runner/jobs/:runId/events            stream JSON events as they happen
-  POST /runner/jobs/:runId/artifact          checkpoint tar.gz on success
+  POST /runner/jobs/:runId/artifact          checkpoint tar.gz on success OR
+                                             on publish-from-runner request
   POST /runner/jobs/:runId/result            final upload (status + events)
 
 Auth header: ``Authorization: Token psr_<48-hex>``. Token issued exactly
@@ -849,6 +851,14 @@ def start(
             break
 
         data = r.json()
+
+        # Publish requests are independent of jobs — handle them first
+        # so they don't get starved when a training run is queued. Cap
+        # is 10 per response from the cloud; we process all of them in
+        # this iteration before moving on.
+        for pub in data.get("pendingPublishes") or []:
+            _process_publish_request(base, headers, pub)
+
         if data.get("status") == "idle":
             if poll_idle_log_every_s > 0 and (time.time() - last_idle_log) >= poll_idle_log_every_s:
                 console.print("[dim]· still polling, no jobs queued[/dim]")
@@ -963,6 +973,59 @@ def _materialize_job_workspace(
         raise RuntimeError(f"bundle is missing {run_yaml_rel} — cloud sent an incomplete bundle.")
     console.print(f"[dim]Bundle extracted to {bundle_dir}[/dim]")
     return bundle_dir, bundle_dir, run_yaml_rel
+
+
+def _process_publish_request(base: str, headers: dict[str, str], pub: dict[str, Any]) -> None:
+    """Tar.gz a locally-stored checkpoint and POST it to the cloud.
+    Triggered when the cloud's poll response includes a pendingPublishes
+    entry — the operator clicked 'Publish from runner →' in Studio
+    after training had moved on.
+
+    Best-effort: a missing checkpoint (operator already ran `runner
+    forget`) prints a warning and moves on. The cloud's
+    publishRequestedAt stays set, so the next poll re-presents this
+    request — clears once the operator either uploads it (re-creating
+    the local copy via a re-run) or revokes the publish request via UI.
+    """
+    run_id = pub.get("runId")
+    run_slug = pub.get("runSlug", run_id)
+    if not isinstance(run_id, str):
+        return
+    local_root = RUNS_ROOT / run_id
+    ckpt = local_root / "checkpoint"
+    if not ckpt.is_dir():
+        console.print(
+            f"[yellow]Publish requested for {run_slug} but local checkpoint is "
+            f"missing.[/yellow] Was it `runner forget`'d? Re-run training to "
+            f"reproduce it, or have the operator click 'Cancel publish' in Studio."
+        )
+        return
+
+    console.print(f"[blue]→[/blue] uploading checkpoint for [bold]{run_slug}[/bold]…")
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tf:
+            tar_path = Path(tf.name)
+        with tarfile.open(tar_path, "w:gz") as tar:
+            tar.add(ckpt, arcname="checkpoint")
+        with open(tar_path, "rb") as fh:
+            r = requests.post(
+                f"{base}/runner/jobs/{run_id}/artifact",
+                headers=headers,
+                files={"file": ("checkpoint.tar.gz", fh, "application/gzip")},
+                timeout=600,
+            )
+        tar_path.unlink(missing_ok=True)
+        if r.ok:
+            size = r.json().get("bytes", 0)
+            console.print(f"[green]✓[/green] published {run_slug} ({size:,} bytes uploaded).")
+        else:
+            console.print(
+                f"[yellow]Cloud rejected publish upload ({r.status_code}):[/yellow] {r.text[:200]}"
+            )
+    except (OSError, requests.RequestException) as e:
+        console.print(
+            f"[yellow]Publish upload for {run_slug} failed:[/yellow] {type(e).__name__}: {e}"
+        )
 
 
 def _run_job(
