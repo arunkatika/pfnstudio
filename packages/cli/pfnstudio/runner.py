@@ -20,18 +20,23 @@ once when a user clicks "Add a runner" in /settings/runners; stored at
 ``~/.pfnstudio/runner.json`` with chmod 0600.
 
 Scope of this module:
-  * register / doctor / status / start subcommands
+  * register / doctor / status / artifacts / forget / start subcommands
   * Long-poll loop with SIGINT / SIGTERM graceful shutdown
   * Per-job heartbeat thread
   * Per-job bundle download → extract to a temp dir → subprocess
-    ``pfnstudio run`` in it → upload checkpoint → tear down the
-    temp dir → post final result
+    ``pfnstudio run`` in it → MOVE checkpoint to local persistent
+    home → tear down the temp dir → post final result with
+    artifactRef={kind:'local-runner',...} so cloud knows where it is
+    without ever seeing the bytes
   * JSON-event piping back to the cloud as Run.events
-  * Checkpoint tar.gz upload before rmtree so cloud-side Publish /
-    serve / endpoint UIs find the trained artifact
   * Live state file at ``~/.pfnstudio/runner-state.json`` (pid,
     last poll, current job + bundle dir + trainer pid) consumed
     by ``runner status`` for at-a-glance "what's it doing" output
+  * Local artifact registry at ``~/.pfnstudio/runs/<runId>/`` —
+    `runner artifacts` lists, `runner forget` deletes. Auto-upload
+    on training-success was removed in 0.8.6: the model stays on
+    the runner until the operator clicks "Publish from runner →"
+    in Studio (Phase 1.5b adds the publish-request poll path)
 
 Still out of scope:
   * Per-job venv isolation (we run in the runner's own Python env).
@@ -78,6 +83,18 @@ CONFIG_PATH = Path.home() / ".pfnstudio" / "runner.json"
 # config — contains nothing secret but matching perms keeps both
 # files invisible to other UIDs on shared machines.
 STATE_PATH = Path.home() / ".pfnstudio" / "runner-state.json"
+
+# Where trained checkpoints land. The runner keeps them locally by
+# default — Studio cloud only ever sees a {kind:'local-runner',...}
+# reference in Run.artifactRef until the user explicitly clicks
+# "Publish from runner →", at which point the runner uploads via the
+# existing /artifact endpoint. This is the data-residency story: the
+# model never leaves this box unless the operator says so.
+#
+# Layout per completed run:
+#   ~/.pfnstudio/runs/<runId>/checkpoint/    model.pt, topology.json, …
+#   ~/.pfnstudio/runs/<runId>/meta.json      {runSlug, completedAt, sizeBytes, cloudUrl}
+RUNS_ROOT = Path.home() / ".pfnstudio" / "runs"
 
 # How often we tell the cloud "yes I'm still running this job". Has to
 # be shorter than the cloud's HEARTBEAT_STALE_S threshold (90s) so the
@@ -158,6 +175,58 @@ def _update_state(**fields: Any) -> None:
             pass
     except OSError:
         pass
+
+
+def _persist_checkpoint(
+    bundle_dir: Path, run_id: str, run_slug: str, cloud_url: str
+) -> tuple[Path, int] | None:
+    """Move the trained checkpoint from the temp bundle dir to its
+    durable home under RUNS_ROOT/<runId>/. Returns (path, sizeBytes)
+    on success; None if there's nothing to persist (no checkpoint dir
+    was written — likely a skipped or failed run).
+
+    Uses shutil.move so an existing local dir from a prior re-run gets
+    cleanly replaced. A previous attempt's leftovers (rare — same runId
+    re-running on the same box) would otherwise grow stale.
+    """
+    src = bundle_dir / "checkpoint"
+    if not src.is_dir():
+        return None
+    dst_root = RUNS_ROOT / run_id
+    dst_ckpt = dst_root / "checkpoint"
+    try:
+        RUNS_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if dst_ckpt.exists():
+            shutil.rmtree(dst_ckpt, ignore_errors=True)
+        dst_root.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst_ckpt))
+    except OSError as e:
+        console.print(f"[yellow]Could not persist checkpoint locally:[/yellow] {e}")
+        return None
+
+    size = 0
+    for p in dst_ckpt.rglob("*"):
+        try:
+            if p.is_file():
+                size += p.stat().st_size
+        except OSError:
+            pass
+
+    # Stash a meta.json so `runner artifacts` can list them without
+    # needing the cloud, and `runner forget` can age-out old runs.
+    meta = {
+        "runId": run_id,
+        "runSlug": run_slug,
+        "completedAt": _ts(),
+        "sizeBytes": size,
+        "cloudUrl": cloud_url,
+    }
+    try:
+        (dst_root / "meta.json").write_text(json.dumps(meta, indent=2))
+    except OSError:
+        pass
+
+    return dst_ckpt, size
 
 
 def _pid_alive(pid: int) -> bool:
@@ -506,6 +575,146 @@ def status() -> None:
     if isinstance(caps.get("diskFreeGb"), (int, float)):
         cap_parts.append(f"{caps['diskFreeGb']} GB free")
     console.print(f"\n[bold]Capabilities[/bold]    : {', '.join(cap_parts) or '(none)'}")
+
+    # ── Local artifacts summary ──
+    local = _scan_local_artifacts()
+    if local:
+        total = sum(it["sizeBytes"] for it in local)
+        console.print(
+            f"[bold]Local artifacts[/bold] : {len(local)} run(s), {_fmt_bytes(total)}  "
+            f"[dim](see `pfnstudio runner artifacts`)[/dim]"
+        )
+
+
+# ── artifacts / forget ──────────────────────────────────────────────
+
+
+def _scan_local_artifacts() -> list[dict[str, Any]]:
+    """Walk RUNS_ROOT for one directory per persisted run. Returns a
+    list sorted newest-first, each entry containing what `runner
+    artifacts` needs to display + what `runner forget` needs to
+    confirm the target."""
+    out: list[dict[str, Any]] = []
+    if not RUNS_ROOT.is_dir():
+        return out
+    for entry in RUNS_ROOT.iterdir():
+        if not entry.is_dir():
+            continue
+        meta_path = entry / "meta.json"
+        meta: dict[str, Any] = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                meta = {}
+        ckpt = entry / "checkpoint"
+        size = 0
+        files = 0
+        if ckpt.is_dir():
+            for p in ckpt.rglob("*"):
+                try:
+                    if p.is_file():
+                        size += p.stat().st_size
+                        files += 1
+                except OSError:
+                    pass
+        out.append(
+            {
+                "runId": meta.get("runId", entry.name),
+                "runSlug": meta.get("runSlug", "?"),
+                "completedAt": meta.get("completedAt"),
+                "sizeBytes": size,
+                "files": files,
+                "path": str(entry),
+            }
+        )
+    out.sort(key=lambda e: e.get("completedAt") or "", reverse=True)
+    return out
+
+
+@runner_app.command()
+def artifacts() -> None:
+    """List trained checkpoints stored locally on this runner.
+
+    These are the runs the cloud knows about as
+    ``artifactRef.kind = 'local-runner'`` — model weights that haven't
+    been uploaded to Studio. Click "Publish from runner →" in Studio
+    to upload one; use ``runner forget <runId>`` to delete locally.
+    """
+    items = _scan_local_artifacts()
+    if not items:
+        console.print(
+            f"[dim]No local artifacts at {RUNS_ROOT}. Trained runs will appear here\n"
+            f"once `pfnstudio runner start` lands a successful job.[/dim]"
+        )
+        return
+    table = Table(title=f"Local artifacts at {RUNS_ROOT}", show_lines=False)
+    table.add_column("Run slug", style="bold")
+    table.add_column("Run ID", style="dim")
+    table.add_column("Completed", style="dim")
+    table.add_column("Size", justify="right")
+    table.add_column("Files", justify="right")
+    total = 0
+    for it in items:
+        total += it["sizeBytes"]
+        completed = it.get("completedAt") or "?"
+        rel = _fmt_age(completed) if completed != "?" else "?"
+        table.add_row(
+            str(it["runSlug"]),
+            str(it["runId"])[:16] + "…",
+            rel,
+            _fmt_bytes(it["sizeBytes"]),
+            str(it["files"]),
+        )
+    console.print(table)
+    console.print(f"[dim]Total: {len(items)} run(s), {_fmt_bytes(total)}.[/dim]")
+
+
+@runner_app.command()
+def forget(
+    run_id: str = typer.Argument(
+        ..., help="Run ID (or substring matching a unique run) to delete locally."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Delete a locally-stored checkpoint to free disk.
+
+    Doesn't affect anything cloud-side — the run record stays, just
+    its ``artifactRef`` becomes stale (the UI shows "missing from
+    runner"). If you also want to publish it first, do that BEFORE
+    calling forget.
+    """
+    items = _scan_local_artifacts()
+    matches = [
+        i
+        for i in items
+        if i["runId"] == run_id or run_id in str(i["runId"]) or run_id in str(i["runSlug"])
+    ]
+    if not matches:
+        console.print(f"[red]No local artifact matches '{run_id}'.[/red]")
+        raise typer.Exit(1)
+    if len(matches) > 1:
+        console.print(f"[red]Ambiguous — '{run_id}' matches {len(matches)} runs:[/red]")
+        for m in matches:
+            console.print(f"  - {m['runSlug']}  ({m['runId']})")
+        console.print("[dim]Re-run with a longer unique prefix.[/dim]")
+        raise typer.Exit(1)
+    target = matches[0]
+    if not yes:
+        console.print(
+            f"About to delete [bold]{target['runSlug']}[/bold] ({target['runId']}, "
+            f"{_fmt_bytes(target['sizeBytes'])}). [yellow]This can't be undone.[/yellow]"
+        )
+        confirm = typer.confirm("Proceed?")
+        if not confirm:
+            console.print("[dim]Aborted.[/dim]")
+            raise typer.Exit(0)
+    try:
+        shutil.rmtree(target["path"])
+    except OSError as e:
+        console.print(f"[red]Delete failed:[/red] {e}")
+        raise typer.Exit(1) from e
+    console.print(f"[green]✓[/green] Removed {target['path']}.")
 
 
 # ── start ────────────────────────────────────────────────────────────
@@ -938,50 +1147,27 @@ def _run_job(
         # the current job forever.
         _update_state(currentJob=None)
 
-        # Upload the checkpoint BEFORE rmtree so cloud's publish /
-        # serve / endpoint UIs can find the trained artifact. Without
-        # this, runner-trained runs lose their checkpoint and the
-        # "Publish" button silently fails (Run.checkpointPath stays
-        # null). Mirrors what the Vast adapter does when it SCPs the
-        # checkpoint back to the cloud after training.
-        #
-        # Best-effort — if the upload fails we still post the result
-        # (so the run shows the right status), just without a
-        # checkpoint. The operator can re-run to retry.
+        # Move the trained checkpoint to its durable local home BEFORE
+        # rmtree wipes the bundle. Data-residency story: the model
+        # stays on this runner unless the operator clicks "Publish
+        # from runner →" in Studio later, which triggers an upload
+        # via the long-poll publish-request channel.
+        artifact_ref: dict[str, Any] | None = None
         if final_status == "completed" and bundle_dir is not None:
-            ckpt = bundle_dir / "checkpoint"
-            if ckpt.is_dir():
-                try:
-                    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tf:
-                        tar_path = Path(tf.name)
-                    import tarfile as _tarfile
-
-                    with _tarfile.open(tar_path, "w:gz") as tar:
-                        # arcname='checkpoint' keeps the same directory
-                        # name when the cloud extracts — matches what
-                        # local-pool runs persist on disk.
-                        tar.add(ckpt, arcname="checkpoint")
-                    with open(tar_path, "rb") as fh:
-                        r = requests.post(
-                            f"{base}/runner/jobs/{run_id}/artifact",
-                            headers=headers,
-                            files={"file": ("checkpoint.tar.gz", fh, "application/gzip")},
-                            timeout=300,
-                        )
-                    tar_path.unlink(missing_ok=True)
-                    if r.ok:
-                        console.print(
-                            f"[dim]Uploaded checkpoint ({r.json().get('bytes', 0)} bytes).[/dim]"
-                        )
-                    else:
-                        console.print(
-                            f"[yellow]Checkpoint upload returned {r.status_code}:[/yellow] "
-                            f"{r.text[:200]}"
-                        )
-                except Exception as e:
-                    console.print(
-                        f"[yellow]Could not upload checkpoint:[/yellow] {type(e).__name__}: {e}"
-                    )
+            persisted = _persist_checkpoint(bundle_dir, run_id, run_slug, base)
+            if persisted is not None:
+                local_path, size_bytes = persisted
+                artifact_ref = {
+                    "kind": "local-runner",
+                    "runId": run_id,
+                    "sizeBytes": size_bytes,
+                    "localPath": str(local_path),
+                }
+                size_mb = size_bytes / (1024 * 1024)
+                console.print(
+                    f"[dim]Checkpoint kept on this runner ({size_mb:.1f} MB) at "
+                    f"{local_path} — click Publish in Studio to upload.[/dim]"
+                )
 
         # Best-effort cleanup. Two cases:
         #   - bundle path: nuke the whole temp extract dir
@@ -1002,15 +1188,18 @@ def _run_job(
         # Post the final state. Retry once on transient errors — losing
         # this report would leave the cloud with the run stuck in
         # 'running' until the next requeue sweep.
+        result_body: dict[str, Any] = {
+            "status": final_status,
+            "events": events_acc,
+            "error": final_error,
+        }
+        if artifact_ref is not None:
+            result_body["artifactRef"] = artifact_ref
         for attempt in range(2):
             try:
                 requests.post(
                     f"{base}/runner/jobs/{run_id}/result",
-                    json={
-                        "status": final_status,
-                        "events": events_acc,
-                        "error": final_error,
-                    },
+                    json=result_body,
                     headers=headers,
                     timeout=30,
                 )
