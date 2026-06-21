@@ -793,6 +793,22 @@ def status() -> None:
         console.print(f"[bold]Runner[/bold]          : {socket.gethostname()}")
         console.print(f"[bold]Cloud[/bold]           : {cfg.get('cloud_url', '?')}")
         console.print(f"[bold]Config[/bold]          : {CONFIG_PATH}")
+        # Surface installed-vs-running version drift. If the operator
+        # ran `pip install -U pfnstudio` while the long-poll loop was
+        # going, the running process is still on the OLD version it
+        # imported at boot. State file's pfnstudioVersionAtStart is
+        # written by `start()` on first state-update; mismatch =>
+        # restart needed.
+        state_pre = _read_state()
+        running_v = state_pre.get("pfnstudioVersionAtStart")
+        if running_v and running_v != __version__:
+            console.print(
+                f"[bold]Version[/bold]         : installed [bold]{__version__}[/bold] · "
+                f"running [yellow]{running_v}[/yellow] "
+                f"[yellow](restart the loop to pick up {__version__})[/yellow]"
+            )
+        else:
+            console.print(f"[bold]Version[/bold]         : {__version__}")
     else:
         console.print(
             f"[bold]Config[/bold]          : [yellow]{CONFIG_PATH} missing[/yellow] — "
@@ -1118,6 +1134,8 @@ def start(
     # Drop a fresh state file so `pfnstudio runner status` reports
     # this loop, not the previous one. stoppedAt=None signals "currently
     # running" — flipped to a timestamp on graceful shutdown below.
+    # pfnstudioVersionAtStart lets `runner status` detect "you upgraded
+    # pip but haven't restarted me" — common operator footgun.
     _update_state(
         pid=os.getpid(),
         startedAt=_ts(),
@@ -1125,6 +1143,7 @@ def start(
         cloudUrl=base,
         currentJob=None,
         stoppedAt=None,
+        pfnstudioVersionAtStart=__version__,
     )
 
     # Phase 2: runner-served endpoints. Two background threads handle
