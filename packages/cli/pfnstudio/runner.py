@@ -20,7 +20,7 @@ once when a user clicks "Add a runner" in /settings/runners; stored at
 ``~/.pfnstudio/runner.json`` with chmod 0600.
 
 Scope of this module:
-  * register / doctor / start subcommands
+  * register / doctor / status / start subcommands
   * Long-poll loop with SIGINT / SIGTERM graceful shutdown
   * Per-job heartbeat thread
   * Per-job bundle download → extract to a temp dir → subprocess
@@ -29,6 +29,9 @@ Scope of this module:
   * JSON-event piping back to the cloud as Run.events
   * Checkpoint tar.gz upload before rmtree so cloud-side Publish /
     serve / endpoint UIs find the trained artifact
+  * Live state file at ``~/.pfnstudio/runner-state.json`` (pid,
+    last poll, current job + bundle dir + trainer pid) consumed
+    by ``runner status`` for at-a-glance "what's it doing" output
 
 Still out of scope:
   * Per-job venv isolation (we run in the runner's own Python env).
@@ -67,6 +70,14 @@ console = Console()
 # Where the bearer token + cloud URL live. Permissions are 0600 so other
 # users on the same machine can't steal the token.
 CONFIG_PATH = Path.home() / ".pfnstudio" / "runner.json"
+
+# Live state of the long-poll loop, used by `pfnstudio runner status`
+# so the operator can see what the runner is doing without having to
+# ssh in and grep `ps`. Updated at significant events: boot, after
+# each poll, on job claim, on job finish, on shutdown. 0600 like the
+# config — contains nothing secret but matching perms keeps both
+# files invisible to other UIDs on shared machines.
+STATE_PATH = Path.home() / ".pfnstudio" / "runner-state.json"
 
 # How often we tell the cloud "yes I'm still running this job". Has to
 # be shorter than the cloud's HEARTBEAT_STALE_S threshold (90s) so the
@@ -115,6 +126,58 @@ def _save_config(cfg: dict[str, Any]) -> None:
         # On Windows the chmod is best-effort; the token is still in the
         # user's profile directory which has reasonable defaults.
         pass
+
+
+# ── State file helpers ────────────────────────────────────────────────
+
+
+def _read_state() -> dict[str, Any]:
+    """Best-effort read of the state file. Returns {} if absent or
+    corrupt — `runner status` interprets missing fields as 'unknown'."""
+    if not STATE_PATH.exists():
+        return {}
+    try:
+        return json.loads(STATE_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _update_state(**fields: Any) -> None:
+    """Merge fields into the state file. NEVER raises — state is
+    informational; a permissions blip or full disk shouldn't take down
+    the long-poll loop. Caller passes keys to set; values of None
+    explicitly null out fields (currentJob=None on job finish, etc.)."""
+    try:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        cur = _read_state()
+        cur.update(fields)
+        STATE_PATH.write_text(json.dumps(cur, indent=2, default=str))
+        try:
+            STATE_PATH.chmod(0o600)
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
+def _pid_alive(pid: int) -> bool:
+    """Cross-platform 'is this PID still running' check. POSIX uses
+    signal 0 (kernel checks the process exists without delivering
+    anything); Windows' os.kill rejects signal 0 but raises a
+    different error if the PID is gone."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # The process exists but is owned by another user / under a
+        # systemd-protected scope. From our POV "alive enough".
+        return True
+    except OSError:
+        return False
 
 
 # ── Capability reporting ──────────────────────────────────────────────
@@ -283,6 +346,168 @@ def doctor() -> None:
     console.print("\n[green]All checks passed.[/green]")
 
 
+# ── status ──────────────────────────────────────────────────────────
+
+
+def _fmt_age(iso_str: str | None) -> str:
+    """Render an ISO timestamp as a relative "Xs/m/h/d ago" string.
+    Returns '?' for None / unparseable input."""
+    if not iso_str:
+        return "?"
+    try:
+        when = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return "?"
+    age = (datetime.now(timezone.utc) - when).total_seconds()
+    if age < 60:
+        return f"{int(age)}s ago"
+    if age < 3600:
+        return f"{int(age / 60)}m ago"
+    if age < 86400:
+        return f"{int(age / 3600)}h ago"
+    return f"{int(age / 86400)}d ago"
+
+
+def _dir_size_bytes(p: Path) -> int:
+    """Quick recursive size of a directory tree. Returns 0 on any
+    permission / not-found error — status is informational."""
+    total = 0
+    try:
+        for entry in p.rglob("*"):
+            try:
+                if entry.is_file():
+                    total += entry.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return total
+
+
+def _fmt_bytes(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
+        n = n / 1024  # type: ignore[assignment]
+    return f"{n:.1f} TB"
+
+
+@runner_app.command()
+def status() -> None:
+    """Report whether the runner is healthy, what job it's running, and
+    where to look on disk. Reads ``~/.pfnstudio/runner-state.json``
+    (written by ``runner start``) + pings the cloud for liveness."""
+    # ── Config + identity ──
+    cfg: dict[str, Any] | None = None
+    if CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text())
+        except (OSError, json.JSONDecodeError):
+            cfg = None
+    if cfg:
+        console.print(f"[bold]Runner[/bold]          : {socket.gethostname()}")
+        console.print(f"[bold]Cloud[/bold]           : {cfg.get('cloud_url', '?')}")
+        console.print(f"[bold]Config[/bold]          : {CONFIG_PATH}")
+    else:
+        console.print(
+            f"[bold]Config[/bold]          : [yellow]{CONFIG_PATH} missing[/yellow] — "
+            "this runner isn't registered.\n"
+            "                  Run [bold]pfnstudio runner register --token psr_…[/bold]"
+        )
+        return
+
+    state = _read_state()
+
+    # ── Long-poll loop liveness ──
+    pid = state.get("pid")
+    started_at = state.get("startedAt")
+    last_poll_at = state.get("lastPollAt")
+    stopped_at = state.get("stoppedAt")
+    if isinstance(pid, int) and _pid_alive(pid) and not stopped_at:
+        console.print(
+            f"[bold]Long-poll loop[/bold]  : [green]✓ RUNNING[/green]  "
+            f"(pid {pid}, up {_fmt_age(started_at)}, last poll {_fmt_age(last_poll_at)})"
+        )
+    elif isinstance(pid, int):
+        console.print(
+            f"[bold]Long-poll loop[/bold]  : [red]✗ NOT RUNNING[/red]\n"
+            f"                  Last seen     : {_fmt_age(stopped_at or last_poll_at)} (pid {pid})\n"
+            f"                  Start it with : [bold]pfnstudio runner start[/bold]"
+        )
+    else:
+        console.print(
+            "[bold]Long-poll loop[/bold]  : [red]✗ NOT RUNNING[/red]\n"
+            "                  No state file from a previous run — never started?\n"
+            "                  Start it with : [bold]pfnstudio runner start[/bold]"
+        )
+
+    # ── Cloud reachable ──
+    if cfg.get("cloud_url"):
+        try:
+            r = requests.get(f"{cfg['cloud_url']}/health", timeout=5)
+            if r.ok:
+                console.print(
+                    f"[bold]Cloud reachable[/bold] : [green]✓ HTTP {r.status_code}[/green]"
+                )
+            else:
+                console.print(
+                    f"[bold]Cloud reachable[/bold] : [yellow]HTTP {r.status_code}[/yellow]"
+                )
+        except requests.RequestException as e:
+            console.print(f"[bold]Cloud reachable[/bold] : [red]✗ {e}[/red]")
+
+    # ── Current job (or idle) ──
+    job = state.get("currentJob") if isinstance(state.get("currentJob"), dict) else None
+    if job:
+        console.print(
+            f"\n[bold]Current job[/bold]     : {job.get('runSlug', '?')} "
+            f"({job.get('runId', '?')[:16]}…)"
+        )
+        console.print(f"  Started        : {_fmt_age(job.get('claimedAt'))}")
+        bundle_dir = job.get("bundleDir")
+        if bundle_dir:
+            bp = Path(bundle_dir)
+            if bp.exists():
+                size = _dir_size_bytes(bp)
+                console.print(f"  Bundle dir     : {bundle_dir}  ({_fmt_bytes(size)})")
+                ckpt = bp / "checkpoint"
+                if ckpt.is_dir():
+                    files = sorted(p.name for p in ckpt.iterdir() if p.is_file())
+                    size = _dir_size_bytes(ckpt)
+                    flist = ", ".join(files[:3]) + (" …" if len(files) > 3 else "")
+                    console.print(
+                        f"  Checkpoint     : {_fmt_bytes(size)} ({flist or 'no files yet'})"
+                    )
+                else:
+                    console.print("  Checkpoint     : not yet written")
+            else:
+                console.print(
+                    f"  Bundle dir     : {bundle_dir}  [yellow](missing — stale state?)[/yellow]"
+                )
+        trainer_pid = job.get("trainerPid")
+        if isinstance(trainer_pid, int):
+            alive_str = "[green]alive[/green]" if _pid_alive(trainer_pid) else "[red]dead[/red]"
+            console.print(f"  Trainer pid    : {trainer_pid} ({alive_str})")
+    else:
+        console.print(
+            "\n[bold]Current job[/bold]     : none — runner idle, waiting for cloud to dispatch"
+        )
+
+    # ── Capabilities snapshot ──
+    caps = _capabilities()
+    cap_parts: list[str] = []
+    if caps.get("torchVersion"):
+        cap_parts.append(f"torch {caps['torchVersion']}")
+    if caps.get("cudaAvailable"):
+        gpu = caps.get("gpu", "")
+        cap_parts.append(f"cuda True{(' ' + gpu) if gpu else ''}")
+    else:
+        cap_parts.append("cuda False")
+    if isinstance(caps.get("diskFreeGb"), (int, float)):
+        cap_parts.append(f"{caps['diskFreeGb']} GB free")
+    console.print(f"\n[bold]Capabilities[/bold]    : {', '.join(cap_parts) or '(none)'}")
+
+
 # ── start ────────────────────────────────────────────────────────────
 
 
@@ -365,6 +590,18 @@ def start(
         f"[dim]Project root: {project_root}  ·  Ctrl-C to stop.[/dim]"
     )
 
+    # Drop a fresh state file so `pfnstudio runner status` reports
+    # this loop, not the previous one. stoppedAt=None signals "currently
+    # running" — flipped to a timestamp on graceful shutdown below.
+    _update_state(
+        pid=os.getpid(),
+        startedAt=_ts(),
+        lastPollAt=_ts(),
+        cloudUrl=base,
+        currentJob=None,
+        stoppedAt=None,
+    )
+
     backoff_idx = 0
     last_idle_log = time.time()
 
@@ -383,6 +620,7 @@ def start(
                 break
             continue
         backoff_idx = 0
+        _update_state(lastPollAt=_ts())
 
         if r.status_code == 401:
             console.print(
@@ -416,6 +654,7 @@ def start(
         _run_job(base, headers, job, project_root, stop_flag)
         last_idle_log = time.time()
 
+    _update_state(stoppedAt=_ts(), currentJob=None)
     console.print("[green]Runner stopped.[/green]")
 
 
@@ -530,6 +769,19 @@ def _run_job(
     run_slug = job.get("runSlug", run_id)
     console.print(f"\n[bold blue]→ claimed[/bold blue] {run_slug} [dim](run_id={run_id})[/dim]")
 
+    # Mark "we have a current job" early so `runner status` can show it
+    # even if bundle download is taking a while. trainerPid + bundleDir
+    # filled in later as they become known.
+    _update_state(
+        currentJob={
+            "runId": run_id,
+            "runSlug": run_slug,
+            "claimedAt": _ts(),
+            "bundleDir": None,
+            "trainerPid": None,
+        }
+    )
+
     # Heartbeat thread keeps the cloud's claim fresh while training runs.
     alive = threading.Event()
     alive.set()
@@ -574,6 +826,17 @@ def _run_job(
         # finally: cleanup knows what to unlink.
         if bundle_dir is None:
             tmp_yaml = work_root / run_yaml_rel
+        # Surface where the bundle landed so `runner status` can show
+        # disk usage + the path the operator would `ls` to inspect.
+        _update_state(
+            currentJob={
+                "runId": run_id,
+                "runSlug": run_slug,
+                "claimedAt": _ts(),
+                "bundleDir": str(bundle_dir) if bundle_dir else str(work_root),
+                "trainerPid": None,
+            }
+        )
 
         # PFNSTUDIO_JSON_PROGRESS=1 tells the local adapter to emit
         # JSON-line events on stdout, which we pipe up to /events.
@@ -596,6 +859,18 @@ def _run_job(
             env=env,
             text=True,
             bufsize=1,
+        )
+        # Record the trainer PID so `runner status` can tell the user
+        # "yes, a python -m pfnstudio run is alive" instead of making
+        # them grep ps.
+        _update_state(
+            currentJob={
+                "runId": run_id,
+                "runSlug": run_slug,
+                "claimedAt": _ts(),
+                "bundleDir": str(bundle_dir) if bundle_dir else str(work_root),
+                "trainerPid": proc.pid,
+            }
         )
 
         assert proc.stdout is not None
@@ -657,6 +932,11 @@ def _run_job(
 
     finally:
         alive.clear()
+        # Clear the currentJob marker so `runner status` reports idle
+        # again. Done eagerly here so a stuck artifact upload below
+        # doesn't make the status command keep showing this run as
+        # the current job forever.
+        _update_state(currentJob=None)
 
         # Upload the checkpoint BEFORE rmtree so cloud's publish /
         # serve / endpoint UIs can find the trained artifact. Without
