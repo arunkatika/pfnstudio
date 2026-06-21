@@ -12,6 +12,7 @@ Wire protocol:
   GET  /runner/jobs/:runId/bundle            tar.gz of the project source
   POST /runner/jobs/:runId/heartbeat         every HEARTBEAT_S seconds
   POST /runner/jobs/:runId/events            stream JSON events as they happen
+  POST /runner/jobs/:runId/artifact          checkpoint tar.gz on success
   POST /runner/jobs/:runId/result            final upload (status + events)
 
 Auth header: ``Authorization: Token psr_<48-hex>``. Token issued exactly
@@ -23,8 +24,11 @@ Scope of this module:
   * Long-poll loop with SIGINT / SIGTERM graceful shutdown
   * Per-job heartbeat thread
   * Per-job bundle download → extract to a temp dir → subprocess
-    ``pfnstudio run`` in it → tear down the temp dir on exit
+    ``pfnstudio run`` in it → upload checkpoint → tear down the
+    temp dir → post final result
   * JSON-event piping back to the cloud as Run.events
+  * Checkpoint tar.gz upload before rmtree so cloud-side Publish /
+    serve / endpoint UIs find the trained artifact
 
 Still out of scope:
   * Per-job venv isolation (we run in the runner's own Python env).
@@ -653,6 +657,52 @@ def _run_job(
 
     finally:
         alive.clear()
+
+        # Upload the checkpoint BEFORE rmtree so cloud's publish /
+        # serve / endpoint UIs can find the trained artifact. Without
+        # this, runner-trained runs lose their checkpoint and the
+        # "Publish" button silently fails (Run.checkpointPath stays
+        # null). Mirrors what the Vast adapter does when it SCPs the
+        # checkpoint back to the cloud after training.
+        #
+        # Best-effort — if the upload fails we still post the result
+        # (so the run shows the right status), just without a
+        # checkpoint. The operator can re-run to retry.
+        if final_status == "completed" and bundle_dir is not None:
+            ckpt = bundle_dir / "checkpoint"
+            if ckpt.is_dir():
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tf:
+                        tar_path = Path(tf.name)
+                    import tarfile as _tarfile
+
+                    with _tarfile.open(tar_path, "w:gz") as tar:
+                        # arcname='checkpoint' keeps the same directory
+                        # name when the cloud extracts — matches what
+                        # local-pool runs persist on disk.
+                        tar.add(ckpt, arcname="checkpoint")
+                    with open(tar_path, "rb") as fh:
+                        r = requests.post(
+                            f"{base}/runner/jobs/{run_id}/artifact",
+                            headers=headers,
+                            files={"file": ("checkpoint.tar.gz", fh, "application/gzip")},
+                            timeout=300,
+                        )
+                    tar_path.unlink(missing_ok=True)
+                    if r.ok:
+                        console.print(
+                            f"[dim]Uploaded checkpoint ({r.json().get('bytes', 0)} bytes).[/dim]"
+                        )
+                    else:
+                        console.print(
+                            f"[yellow]Checkpoint upload returned {r.status_code}:[/yellow] "
+                            f"{r.text[:200]}"
+                        )
+                except Exception as e:
+                    console.print(
+                        f"[yellow]Could not upload checkpoint:[/yellow] {type(e).__name__}: {e}"
+                    )
+
         # Best-effort cleanup. Two cases:
         #   - bundle path: nuke the whole temp extract dir
         #   - fallback path: just unlink the temp run.yaml we wrote
