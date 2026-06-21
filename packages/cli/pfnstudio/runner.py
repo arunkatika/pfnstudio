@@ -7,15 +7,23 @@ addressable across reboots.
 
 Wire protocol:
 
-  POST /runner/capabilities                  on startup: report torch/CUDA/disk
-  GET  /runner/jobs/next                     long-poll for next claimable job
-                                             (+ pendingPublishes piggybacked)
-  GET  /runner/jobs/:runId/bundle            tar.gz of the project source
-  POST /runner/jobs/:runId/heartbeat         every HEARTBEAT_S seconds
-  POST /runner/jobs/:runId/events            stream JSON events as they happen
-  POST /runner/jobs/:runId/artifact          checkpoint tar.gz on success OR
-                                             on publish-from-runner request
-  POST /runner/jobs/:runId/result            final upload (status + events)
+  POST /runner/capabilities                       on startup: torch/CUDA/disk
+  GET  /runner/jobs/next                          long-poll for next claimable
+                                                  job (+ pendingPublishes)
+  GET  /runner/jobs/:runId/bundle                 tar.gz of the project source
+  POST /runner/jobs/:runId/heartbeat              every HEARTBEAT_S seconds
+  POST /runner/jobs/:runId/events                 stream JSON events as they
+                                                  happen
+  POST /runner/jobs/:runId/artifact               checkpoint tar.gz on success
+                                                  OR publish-from-runner
+  POST /runner/jobs/:runId/result                 final upload (status+events)
+
+  GET  /runner/serve-targets                      Phase 2: deployments this
+                                                  runner should be serving
+  POST /runner/deployments/:id/serve-ready        local serve subprocess up
+  GET  /runner/predict-requests                   short-poll for pending
+                                                  predict requests
+  POST /runner/predict-requests/:id/response      post local serve's response
 
 Auth header: ``Authorization: Token psr_<48-hex>``. Token issued exactly
 once when a user clicks "Add a runner" in /settings/runners; stored at
@@ -39,6 +47,12 @@ Scope of this module:
     on training-success was removed in 0.8.6: the model stays on
     the runner until the operator clicks "Publish from runner →"
     in Studio (Phase 1.5b adds the publish-request poll path)
+  * Phase 2 (0.8.8) runner-served endpoints: two background threads
+    serve_manager (every 5 s reconciles local pfnstudio-serve
+    subprocesses with the cloud's serve-targets list) and
+    predict_poller (every 250 ms forwards predict requests to the
+    matching local serve, posts the response back). Inference data
+    never leaves the runner box.
 
 Still out of scope:
   * Per-job venv isolation (we run in the runner's own Python env).
@@ -110,6 +124,21 @@ POLL_TIMEOUT_S = 35
 # Backoff schedule when the cloud is unreachable / 5xx. Capped so a
 # transient blip doesn't push the next attempt arbitrarily far.
 BACKOFF_LADDER_S = (2, 5, 15, 30, 60)
+
+# How often the serve manager reconciles its running subprocesses with
+# cloud's serve-targets list. 5 s is fine — endpoint create/delete is
+# a deliberate user action, not high-frequency.
+SERVE_TARGETS_POLL_S = 5
+
+# How often the predict poller asks for pending requests. Tight (250 ms)
+# because end-user-facing latency is the sum of this + local serve
+# inference + posting back. Postgres queries are indexed.
+PREDICT_POLL_S = 0.25
+
+# Per-predict-request timeout when forwarding to the local serve
+# subprocess. Most PFN inference is sub-second; 60 s catches CPU
+# warm-up + the rare big batch.
+PREDICT_FORWARD_TIMEOUT_S = 60
 
 runner_app = typer.Typer(
     name="runner",
@@ -229,6 +258,291 @@ def _persist_checkpoint(
         pass
 
     return dst_ckpt, size
+
+
+# ── Phase 2: serve-lifecycle + predict polling ──────────────────────
+
+
+def _spawn_serve_for(run_id: str, run_slug: str) -> tuple[subprocess.Popen[str], int] | None:
+    """Boot a ``pfnstudio serve`` subprocess for one run on a random
+    loopback port. Returns (proc, port) on success; None if the local
+    checkpoint is missing or the subprocess fails to declare a port
+    within 15 s (which generally means torch / dep load failed).
+
+    The serve binary writes a single JSON line to stdout once the HTTP
+    server is up: ``{"event":"ready","port":N,...}``. We block on that
+    line so the registry only contains servers actually accepting
+    requests.
+    """
+    run_dir = RUNS_ROOT / run_id
+    ckpt = run_dir / "checkpoint"
+    if not ckpt.is_dir():
+        console.print(
+            f"[yellow]Cannot serve {run_slug}: local checkpoint missing at "
+            f"{ckpt}. Operator may have run `runner forget`. Re-train to "
+            f"reproduce it.[/yellow]"
+        )
+        return None
+
+    # The cloud's bundle download wrote the run.yaml into the bundle
+    # dir during training — by now that bundle is gone (rmtree on
+    # finish). We rebuild the minimal manifest from the registry's
+    # meta.json + the checkpoint dir's topology.json. `pfnstudio serve`
+    # accepts the path to a run.yaml; we synthesise one alongside the
+    # checkpoint so the loader has its input shape.
+    manifest = run_dir / "run.yaml"
+    if not manifest.exists():
+        # Bare-minimum manifest — serve only needs id + a few hints.
+        # The actual prior + model definitions live inside the
+        # checkpoint's topology.json which the loader prefers anyway.
+        try:
+            manifest.write_text(yaml.safe_dump({"id": run_slug}))
+        except OSError:
+            pass
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "pfnstudio",
+            "serve",
+            str(manifest),
+            "--checkpoint",
+            str(ckpt),
+            "--port",
+            "0",  # let OS pick; serve emits the port on the ready event.
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    # Read until we see the ready event or the process exits — DON'T
+    # consume the full stdout (we want it to keep flowing for logs);
+    # leave the pipe attached and let a small reader thread drain it.
+    port: int | None = None
+    deadline = time.time() + 15
+    assert proc.stdout is not None
+    while time.time() < deadline and port is None:
+        line = proc.stdout.readline()
+        if not line:
+            if proc.poll() is not None:
+                break  # subprocess exited
+            continue
+        try:
+            ev = json.loads(line)
+            if ev.get("event") == "ready" and isinstance(ev.get("port"), int):
+                port = ev["port"]
+                break
+        except (json.JSONDecodeError, TypeError):
+            continue
+    if port is None:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        console.print(
+            f"[yellow]Serve for {run_slug} didn't emit a ready event within 15 s — "
+            f"giving up. Likely a torch / model load failure.[/yellow]"
+        )
+        return None
+    # Drain the rest of stdout in a daemon thread so the pipe buffer
+    # doesn't block the subprocess once it's serving.
+    threading.Thread(
+        target=lambda: [_ for _ in iter(proc.stdout.readline, "")],  # type: ignore[union-attr]
+        daemon=True,
+    ).start()
+    return proc, port
+
+
+def _serve_manager_loop(
+    base: str,
+    headers: dict[str, str],
+    registry: dict[str, dict[str, Any]],
+    lock: threading.Lock,
+    stop_flag: threading.Event,
+) -> None:
+    """Reconcile local pfnstudio-serve subprocesses with the cloud's
+    serve-targets list. Registry shape:
+        {deploymentId: {runId, runSlug, proc, port, ready}}
+    """
+    while not stop_flag.is_set():
+        try:
+            r = requests.get(
+                f"{base}/runner/serve-targets",
+                headers=headers,
+                timeout=10,
+            )
+            if r.ok:
+                targets = r.json().get("targets") or []
+                target_ids = {t["deploymentId"] for t in targets}
+                # Start any new targets we don't have a serve for yet.
+                for t in targets:
+                    dep_id = t["deploymentId"]
+                    run_id = t["runId"]
+                    if dep_id in registry:
+                        continue
+                    spawned = _spawn_serve_for(run_id, run_id[:8])
+                    if not spawned:
+                        continue
+                    proc, port = spawned
+                    with lock:
+                        registry[dep_id] = {
+                            "runId": run_id,
+                            "proc": proc,
+                            "port": port,
+                            "ready": False,
+                        }
+                    # Tell the cloud the serve is up so its Deployment
+                    # flips to status='ready' and the predict UI unlocks.
+                    try:
+                        ack = requests.post(
+                            f"{base}/runner/deployments/{dep_id}/serve-ready",
+                            headers=headers,
+                            timeout=10,
+                        )
+                        if ack.ok:
+                            with lock:
+                                registry[dep_id]["ready"] = True
+                            console.print(
+                                f"[green]✓[/green] serving deployment {dep_id[:12]}… "
+                                f"on localhost:{port}"
+                            )
+                    except requests.RequestException:
+                        pass
+                # Stop any serves whose deployments were deleted.
+                with lock:
+                    to_kill = [d for d in registry if d not in target_ids]
+                for d in to_kill:
+                    with lock:
+                        entry = registry.pop(d, None)
+                    if entry:
+                        try:
+                            entry["proc"].terminate()
+                        except ProcessLookupError:
+                            pass
+                        console.print(f"[dim]stopped serve for deployment {d[:12]}…[/dim]")
+        except requests.RequestException:
+            pass
+        if stop_flag.wait(SERVE_TARGETS_POLL_S):
+            break
+    # Shutdown — kill any running serves.
+    with lock:
+        for entry in registry.values():
+            try:
+                entry["proc"].terminate()
+            except ProcessLookupError:
+                pass
+
+
+def _predict_poll_loop(
+    base: str,
+    headers: dict[str, str],
+    registry: dict[str, dict[str, Any]],
+    lock: threading.Lock,
+    stop_flag: threading.Event,
+) -> None:
+    """Short-poll for pending predict requests, forward each to its
+    deployment's local serve subprocess, post the response back."""
+    while not stop_flag.is_set():
+        try:
+            r = requests.get(
+                f"{base}/runner/predict-requests",
+                headers=headers,
+                timeout=10,
+            )
+            if r.ok:
+                for req in r.json().get("requests") or []:
+                    _forward_predict(base, headers, registry, lock, req)
+        except requests.RequestException:
+            pass
+        if stop_flag.wait(PREDICT_POLL_S):
+            break
+
+
+def _forward_predict(
+    base: str,
+    headers: dict[str, str],
+    registry: dict[str, dict[str, Any]],
+    lock: threading.Lock,
+    req: dict[str, Any],
+) -> None:
+    """Forward one claimed predict request to the local serve, post
+    the response back to cloud. Best-effort: errors get reported back
+    as responseError so the caller sees something coherent."""
+    req_id = req.get("id")
+    dep_id = req.get("deploymentId")
+    payload = req.get("payload") or {}
+    if not isinstance(req_id, str) or not isinstance(dep_id, str):
+        return
+
+    with lock:
+        entry = registry.get(dep_id)
+    if not entry:
+        _post_predict_response(
+            base,
+            headers,
+            req_id,
+            error="no local serve for this deployment (race with shutdown?)",
+            status=503,
+        )
+        return
+
+    port = entry["port"]
+    try:
+        r = requests.post(
+            f"http://127.0.0.1:{port}/predict",
+            json=payload,
+            timeout=PREDICT_FORWARD_TIMEOUT_S,
+        )
+        _post_predict_response(
+            base,
+            headers,
+            req_id,
+            status=r.status_code,
+            payload=_safe_json(r),
+        )
+    except requests.RequestException as e:
+        _post_predict_response(
+            base,
+            headers,
+            req_id,
+            error=f"{type(e).__name__}: {e}",
+            status=502,
+        )
+
+
+def _safe_json(resp: requests.Response) -> Any:
+    try:
+        return resp.json()
+    except ValueError:
+        return {"raw": resp.text[:4000]}
+
+
+def _post_predict_response(
+    base: str,
+    headers: dict[str, str],
+    req_id: str,
+    *,
+    status: int = 200,
+    payload: Any = None,
+    error: str | None = None,
+) -> None:
+    body: dict[str, Any] = {"status": status}
+    if payload is not None:
+        body["payload"] = payload
+    if error is not None:
+        body["error"] = error
+    try:
+        requests.post(
+            f"{base}/runner/predict-requests/{req_id}/response",
+            headers=headers,
+            json=body,
+            timeout=15,
+        )
+    except requests.RequestException:
+        # Cloud's 30 s wait will time out; nothing we can do here.
+        pass
 
 
 def _pid_alive(pid: int) -> bool:
@@ -812,6 +1126,31 @@ def start(
         currentJob=None,
         stoppedAt=None,
     )
+
+    # Phase 2: runner-served endpoints. Two background threads handle
+    # the inference side while the main loop keeps polling for jobs:
+    #
+    #   serve_manager — every SERVE_TARGETS_POLL_S seconds, ask cloud
+    #     which deployments this runner should be running, start /
+    #     stop pfnstudio-serve subprocesses to match.
+    #
+    #   predict_poller — every PREDICT_POLL_S (~250 ms), pull pending
+    #     predict requests, forward them to the matching local serve
+    #     subprocess, post the response back.
+    serve_registry: dict[str, dict[str, Any]] = {}
+    serve_lock = threading.Lock()
+    serve_thread = threading.Thread(
+        target=_serve_manager_loop,
+        args=(base, headers, serve_registry, serve_lock, stop_flag),
+        daemon=True,
+    )
+    predict_thread = threading.Thread(
+        target=_predict_poll_loop,
+        args=(base, headers, serve_registry, serve_lock, stop_flag),
+        daemon=True,
+    )
+    serve_thread.start()
+    predict_thread.start()
 
     backoff_idx = 0
     last_idle_log = time.time()
