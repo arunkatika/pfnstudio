@@ -243,6 +243,25 @@ def _persist_checkpoint(
         except OSError:
             pass
 
+    # Stash the run YAML alongside the checkpoint. Two reasons:
+    #   1. `pfnstudio serve` needs a real run manifest as its first
+    #      arg — it reads prior/model/evals to reconstruct the
+    #      ModelLoader's task dispatch. A bare {id} stub crashes the
+    #      loader inside the subprocess and the serve_manager can
+    #      only see "didn't emit ready event in 15 s".
+    #   2. `pfnstudio runner forget` + `pfnstudio runner artifacts`
+    #      can show the run slug + structure without phoning home.
+    #
+    # The cloud's streamRunnerBundle already writes runs/<slug>.yaml
+    # into the bundle root with normalized {id, version} refs; copy
+    # that into the persistent dir before rmtree wipes the bundle.
+    src_yaml = bundle_dir / "runs" / f"{run_slug}.yaml"
+    if src_yaml.exists():
+        try:
+            shutil.copy2(str(src_yaml), str(dst_root / "run.yaml"))
+        except OSError:
+            pass
+
     # Stash a meta.json so `runner artifacts` can list them without
     # needing the cloud, and `runner forget` can age-out old runs.
     meta = {
@@ -284,22 +303,26 @@ def _spawn_serve_for(run_id: str, run_slug: str) -> tuple[subprocess.Popen[str],
         )
         return None
 
-    # The cloud's bundle download wrote the run.yaml into the bundle
-    # dir during training — by now that bundle is gone (rmtree on
-    # finish). We rebuild the minimal manifest from the registry's
-    # meta.json + the checkpoint dir's topology.json. `pfnstudio serve`
-    # accepts the path to a run.yaml; we synthesise one alongside the
-    # checkpoint so the loader has its input shape.
+    # `pfnstudio serve` needs a real run.yaml — the manifest the
+    # trainer used, carrying prior/model/evals references. It gets
+    # copied here by _persist_checkpoint when training succeeds (the
+    # cloud's bundle ships runs/<slug>.yaml). Older runs persisted
+    # before this fix landed won't have it; fall back to a stub but
+    # log loudly so the operator knows to re-train.
     manifest = run_dir / "run.yaml"
     if not manifest.exists():
-        # Bare-minimum manifest — serve only needs id + a few hints.
-        # The actual prior + model definitions live inside the
-        # checkpoint's topology.json which the loader prefers anyway.
-        try:
-            manifest.write_text(yaml.safe_dump({"id": run_slug}))
-        except OSError:
-            pass
+        console.print(
+            f"[yellow]Cannot serve {run_slug}: no run.yaml at {manifest}. "
+            f"This means the run was trained on a pre-0.8.11 runner that "
+            f"didn't persist the manifest. Re-run training to regenerate.[/yellow]"
+        )
+        return None
 
+    # Drain subprocess output in real time so we can:
+    #   (a) detect the {event:'ready',port:N} line and unblock
+    #   (b) capture stderr / non-JSON lines for the failure path
+    #       (which previously got silently swallowed — the "giving
+    #       up after 15s" message had no diagnostics attached).
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -317,10 +340,8 @@ def _spawn_serve_for(run_id: str, run_slug: str) -> tuple[subprocess.Popen[str],
         text=True,
         bufsize=1,
     )
-    # Read until we see the ready event or the process exits — DON'T
-    # consume the full stdout (we want it to keep flowing for logs);
-    # leave the pipe attached and let a small reader thread drain it.
     port: int | None = None
+    captured: list[str] = []
     deadline = time.time() + 15
     assert proc.stdout is not None
     while time.time() < deadline and port is None:
@@ -329,11 +350,23 @@ def _spawn_serve_for(run_id: str, run_slug: str) -> tuple[subprocess.Popen[str],
             if proc.poll() is not None:
                 break  # subprocess exited
             continue
+        captured.append(line.rstrip("\n"))
         try:
             ev = json.loads(line)
             if ev.get("event") == "ready" and isinstance(ev.get("port"), int):
                 port = ev["port"]
                 break
+            if ev.get("event") == "error":
+                # Loader emitted a structured error — surface immediately.
+                console.print(
+                    f"[red]Serve for {run_slug} reported an error at "
+                    f"stage={ev.get('stage', '?')}:[/red] {ev.get('message', line)}"
+                )
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                return None
         except (json.JSONDecodeError, TypeError):
             continue
     if port is None:
@@ -341,9 +374,15 @@ def _spawn_serve_for(run_id: str, run_slug: str) -> tuple[subprocess.Popen[str],
             proc.kill()
         except ProcessLookupError:
             pass
+        exit_code = proc.poll()
+        # Dump the captured output so the operator can see WHY the
+        # subprocess didn't reach ready. Trim to last ~30 lines — full
+        # tracebacks are noisy but the relevant lines are always near
+        # the tail.
+        tail = "\n  ".join(captured[-30:]) if captured else "(no output captured)"
         console.print(
-            f"[yellow]Serve for {run_slug} didn't emit a ready event within 15 s — "
-            f"giving up. Likely a torch / model load failure.[/yellow]"
+            f"[yellow]Serve for {run_slug} didn't emit a ready event within 15 s "
+            f"(exit_code={exit_code}). Subprocess output:[/yellow]\n  {tail}"
         )
         return None
     # Drain the rest of stdout in a daemon thread so the pipe buffer
