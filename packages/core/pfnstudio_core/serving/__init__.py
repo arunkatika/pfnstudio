@@ -14,4 +14,4 @@ threading model is fine for Phase 1's load profile.
 from .hf import pull_snapshot, push_folder
 from .worker import serve
 
-__all__ = ["serve", "push_folder", "pull_snapshot"]
+__all__ = ["pull_snapshot", "push_folder", "serve"]

@@ -54,7 +54,7 @@ def _make_handler(loader: Any) -> type[BaseHTTPRequestHandler]:
         # tails stdout for the event-stream protocol above; HTTP access
         # logs would interleave and confuse the parser. Errors still
         # surface via log_error → stderr (kept for debugging).
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        def log_message(self, format: str, *args: Any) -> None:
             pass
 
         def _send_json(self, status: int, body: dict[str, Any]) -> None:
@@ -65,7 +65,7 @@ def _make_handler(loader: Any) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(data)
 
-        def do_GET(self) -> None:  # noqa: N802 — stdlib API
+        def do_GET(self) -> None:
             if self.path == "/healthz":
                 # Worker is fully constructed before do_GET can be
                 # invoked (server isn't started until __init__ done),
@@ -74,7 +74,7 @@ def _make_handler(loader: Any) -> type[BaseHTTPRequestHandler]:
                 return
             self._send_json(404, {"error": "not_found", "path": self.path})
 
-        def do_POST(self) -> None:  # noqa: N802 — stdlib API
+        def do_POST(self) -> None:
             if self.path != "/predict":
                 self._send_json(404, {"error": "not_found", "path": self.path})
                 return

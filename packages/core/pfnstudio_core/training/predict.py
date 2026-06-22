@@ -233,7 +233,7 @@ class ModelLoader:
             sys.path.remove(root)
         self._project_root_str = None
 
-    def __enter__(self) -> "ModelLoader":
+    def __enter__(self) -> ModelLoader:
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -601,9 +601,7 @@ def _dispatch_inference(
         if x_qry.ndim == 1:
             x_qry = x_qry.reshape(-1, 1)
 
-        packed_input = (
-            expected_d_in is not None and int(x_ctx.shape[-1]) + 2 == expected_d_in
-        )
+        packed_input = expected_d_in is not None and int(x_ctx.shape[-1]) + 2 == expected_d_in
         if packed_input:
             seq = _pack_context_query(x_ctx, lbl_ctx, x_qry)
         else:
@@ -644,9 +642,7 @@ def _dispatch_inference(
         if x_qry.ndim == 1:
             x_qry = x_qry.reshape(-1, 1)
 
-        packed_input = (
-            expected_d_in is not None and int(x_ctx.shape[-1]) + 2 == expected_d_in
-        )
+        packed_input = expected_d_in is not None and int(x_ctx.shape[-1]) + 2 == expected_d_in
         if packed_input:
             seq = _pack_context_query(x_ctx, y_ctx, x_qry)
         else:
