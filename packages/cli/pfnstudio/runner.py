@@ -243,20 +243,33 @@ def _persist_checkpoint(
         except OSError:
             pass
 
-    # Stash the run YAML alongside the checkpoint. Two reasons:
-    #   1. `pfnstudio serve` needs a real run manifest as its first
-    #      arg — it reads prior/model/evals to reconstruct the
-    #      ModelLoader's task dispatch. A bare {id} stub crashes the
-    #      loader inside the subprocess and the serve_manager can
-    #      only see "didn't emit ready event in 15 s".
-    #   2. `pfnstudio runner forget` + `pfnstudio runner artifacts`
-    #      can show the run slug + structure without phoning home.
+    # Persist the entire project tree from the bundle alongside the
+    # checkpoint. ModelLoader reads priors/<id>/prior.yaml + prior.py,
+    # models/<id>.yaml, evals/<id>.yaml at load time to reconstruct
+    # the model — without these, serve fails with
+    # "FileNotFoundError: model.yaml not found at <cwd>/models/...".
     #
-    # The cloud's streamRunnerBundle already writes runs/<slug>.yaml
-    # into the bundle root with normalized {id, version} refs; copy
-    # that into the persistent dir before rmtree wipes the bundle.
+    # The cloud's streamRunnerBundle already writes the canonical
+    # project layout into the bundle root with normalized refs; just
+    # copy the project dirs across before rmtree wipes the bundle.
+    # run.yaml is also stashed at the runs/<slug>.yaml path the serve
+    # CLI's project-auto-detect logic expects (parent.parent of the
+    # manifest when its parent is named 'runs').
+    for sub in ("priors", "models", "evals", "runs"):
+        src = bundle_dir / sub
+        if not src.is_dir():
+            continue
+        dst = dst_root / sub
+        try:
+            if dst.exists():
+                shutil.rmtree(dst, ignore_errors=True)
+            shutil.copytree(str(src), str(dst))
+        except OSError as e:
+            console.print(f"[yellow]Could not persist {sub}/ locally:[/yellow] {e}")
+    # Also keep run.yaml at the top level for compatibility with the
+    # `pfnstudio serve run.yaml` invocation in _spawn_serve_for.
     src_yaml = bundle_dir / "runs" / f"{run_slug}.yaml"
-    if src_yaml.exists():
+    if src_yaml.exists() and not (dst_root / "run.yaml").exists():
         try:
             shutil.copy2(str(src_yaml), str(dst_root / "run.yaml"))
         except OSError:
@@ -332,6 +345,13 @@ def _spawn_serve_for(run_id: str, run_slug: str) -> tuple[subprocess.Popen[str],
             str(manifest),
             "--checkpoint",
             str(ckpt),
+            "--project",
+            # Pin project_root to the persisted dir. Without --project,
+            # serve falls back to Path.cwd() (which is wherever the
+            # operator started 'pfnstudio runner start' from — often
+            # /home/user or some random path) and ModelLoader looks
+            # for models/<id>.yaml THERE, not next to the checkpoint.
+            str(run_dir),
             "--port",
             "0",  # let OS pick; serve emits the port on the ready event.
         ],
@@ -404,7 +424,14 @@ def _serve_manager_loop(
     """Reconcile local pfnstudio-serve subprocesses with the cloud's
     serve-targets list. Registry shape:
         {deploymentId: {runId, runSlug, proc, port, ready}}
+
+    Per-deployment failure backoff: a deployment whose spawn fails
+    gets retried with exponentially-spaced cooldowns (5s, 30s, 5min,
+    capped) so a broken artifact doesn't flood the terminal with the
+    same loader error every reconcile.
     """
+    # deploymentId → {fails, nextAttemptAt} for the backoff tracker
+    failures: dict[str, dict[str, float]] = {}
     while not stop_flag.is_set():
         try:
             r = requests.get(
@@ -415,15 +442,57 @@ def _serve_manager_loop(
             if r.ok:
                 targets = r.json().get("targets") or []
                 target_ids = {t["deploymentId"] for t in targets}
+                # Drop backoff state for deployments that have gone
+                # away — covers the operator "delete the failing
+                # deployment + create a new one with a different id".
+                for stale in [d for d in failures if d not in target_ids]:
+                    failures.pop(stale, None)
                 # Start any new targets we don't have a serve for yet.
+                now = time.time()
                 for t in targets:
                     dep_id = t["deploymentId"]
                     run_id = t["runId"]
                     if dep_id in registry:
                         continue
-                    spawned = _spawn_serve_for(run_id, run_id[:8])
-                    if not spawned:
+                    fail_state = failures.get(dep_id)
+                    if fail_state and now < fail_state["nextAttemptAt"]:
+                        continue  # in cooldown
+                    if dep_id in registry:
                         continue
+                    # Read the persisted run.yaml's `id` for a human-
+                    # friendly slug, falling back to the runId tail if
+                    # the persistence is missing. run_id[:8] would
+                    # collide across runs that share a CUID prefix —
+                    # surprisingly common when a re-train reuses the
+                    # same time-bucketed id space.
+                    persisted_yaml = RUNS_ROOT / run_id / "run.yaml"
+                    run_slug = run_id[-8:]
+                    if persisted_yaml.exists():
+                        try:
+                            doc = yaml.safe_load(persisted_yaml.read_text())
+                            if isinstance(doc, dict) and isinstance(doc.get("id"), str):
+                                run_slug = doc["id"]
+                        except (OSError, yaml.YAMLError):
+                            pass
+                    spawned = _spawn_serve_for(run_id, run_slug)
+                    if not spawned:
+                        # Exponential cooldown so a broken artifact
+                        # doesn't reprint the same loader error every
+                        # 5s. 5s → 30s → 5min → 5min ...
+                        prev = failures.get(dep_id, {"fails": 0})
+                        n = int(prev.get("fails", 0)) + 1
+                        backoff_s = (5, 30, 300, 300, 300)[min(n - 1, 4)]
+                        failures[dep_id] = {
+                            "fails": n,
+                            "nextAttemptAt": time.time() + backoff_s,
+                        }
+                        if n == 1:
+                            console.print(
+                                f"[dim]Backing off serve retries for "
+                                f"{run_slug} (next attempt in {backoff_s}s).[/dim]"
+                            )
+                        continue
+                    failures.pop(dep_id, None)
                     proc, port = spawned
                     with lock:
                         registry[dep_id] = {
