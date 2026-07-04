@@ -390,6 +390,28 @@ def train_pfn(
                 seen.append(v)
         return seen
 
+    def _block_nn_named_modules(b: Any) -> list:
+        """(attr_name, nn.Module) pairs — the named companion of
+        ``_block_nn_modules``. A block with >1 nn.Module needs its submodules
+        namespaced by attribute in the checkpoint, otherwise colliding param
+        keys (two Sequentials each with "0.weight") overwrite each other at
+        save time. Single-module blocks keep the legacy flat keying.
+        """
+        if nn_module_cls is not None and isinstance(b, nn_module_cls):
+            return [("", b)]
+        out: list = []
+        attached = getattr(b, "module", None)
+        if nn_module_cls is not None and isinstance(attached, nn_module_cls):
+            out.append(("module", attached))
+        for attr, v in vars(b).items():
+            if (
+                nn_module_cls is not None
+                and isinstance(v, nn_module_cls)
+                and all(v is not m for _, m in out)
+            ):
+                out.append((attr, v))
+        return out
+
     params = []
     for _, mod in getattr(model, "modules", []):
         for sub in _block_nn_modules(mod):
@@ -560,9 +582,15 @@ def train_pfn(
         sd: dict[str, Any] = {}
         param_count = 0
         for name, mod in getattr(model, "modules", []):
-            for sub in _block_nn_modules(mod):
+            named = _block_nn_named_modules(mod)
+            multi = len(named) > 1
+            for attr, sub in named:
+                # Namespace each submodule by attr ONLY when the block has more
+                # than one nn.Module — keeps single-module blocks on the exact
+                # legacy keying so existing checkpoints still bind.
+                prefix = f"{name}.{attr}." if (multi and attr) else f"{name}."
                 for k, v in sub.state_dict().items():
-                    sd[f"{name}.{k}"] = v
+                    sd[f"{prefix}{k}"] = v
                     param_count += 1
         if param_count == 0:
             # Empty state_dict means _block_nn_modules didn't find any

@@ -70,6 +70,33 @@ def _block_nn_modules(b: Any) -> list:
     return seen
 
 
+def _block_nn_named_modules(b: Any) -> list:
+    """Like ``_block_nn_modules`` but pairs each nn.Module with the attribute
+    name it is stored under.
+
+    A block that holds MORE THAN ONE nn.Module — e.g. a gated residual with
+    both a ``mlp`` and a ``gate`` ``nn.Sequential`` — needs its submodules
+    namespaced in the checkpoint. Both Sequentials expose a ``0.weight`` key,
+    so keyed under only the bare block name they collide and silently
+    overwrite each other at save time (the reload then feeds ``gate``'s
+    ``0.weight`` into ``mlp`` → a size-mismatch RuntimeError). The attribute
+    name is that per-submodule namespace. Single-module blocks (every
+    built-in) keep the legacy flat keying, so no existing checkpoint changes.
+    """
+    import torch.nn as _nn
+
+    if isinstance(b, _nn.Module):
+        return [("", b)]
+    out: list = []
+    attached = getattr(b, "module", None)
+    if isinstance(attached, _nn.Module):
+        out.append(("module", attached))
+    for attr, v in vars(b).items():
+        if isinstance(v, _nn.Module) and all(v is not m for _, m in out):
+            out.append((attr, v))
+    return out
+
+
 class ModelLoader:
     """Hold a trained PFN checkpoint in memory, ready to serve many
     ``predict()`` calls without re-reading the run / model yaml /
@@ -145,13 +172,35 @@ class ModelLoader:
             flat = torch.load(ckpt_path, map_location="cpu", weights_only=False)
 
             for name, mod in getattr(self.model, "modules", []):
-                sd = {k[len(name) + 1 :]: v for k, v in flat.items() if k.startswith(name + ".")}
-                if not sd:
+                block_sd = {
+                    k[len(name) + 1 :]: v for k, v in flat.items() if k.startswith(name + ".")
+                }
+                if not block_sd:
                     continue
-                for sub in _block_nn_modules(mod):
+                named = _block_nn_named_modules(mod)
+                multi = len(named) > 1
+                for attr, sub in named:
+                    if multi and attr:
+                        # Namespaced checkpoint: pull only this submodule's
+                        # keys (e.g. "mlp.*") so a sibling's colliding
+                        # "0.weight" can't be loaded into the wrong module.
+                        sub_sd = {
+                            k[len(attr) + 1 :]: v
+                            for k, v in block_sd.items()
+                            if k.startswith(attr + ".")
+                        }
+                        if not sub_sd and any(True for _ in sub.parameters()):
+                            raise RuntimeError(
+                                f"Checkpoint for block '{name}' predates the "
+                                f"multi-submodule fix — no namespaced weights "
+                                f"for '{attr}'. Re-run training to produce a "
+                                f"compatible checkpoint."
+                            )
+                    else:
+                        sub_sd = block_sd
                     # strict=False ignores keys that don't belong to this
                     # sub-module — supports blocks with multiple nn.Modules.
-                    sub.load_state_dict(sd, strict=False)
+                    sub.load_state_dict(sub_sd, strict=False)
                     sub.eval()
 
             # Tabular embedder width (packed-token d_in), not an
