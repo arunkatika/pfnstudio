@@ -54,9 +54,12 @@ def get_prior(name: str) -> type:
 
 
 def get_block(name: str) -> type:
-    if name not in _BLOCKS:
-        raise KeyError(f"No block registered under '{name}'. Available: {sorted(_BLOCKS)}")
-    return _BLOCKS[name]
+    # Tolerate `-` ↔ `_` swaps, same as get_prior: the DB slugifier uses `-`
+    # but @register_block names are idiomatic snake_case.
+    for candidate in (name, name.replace("-", "_"), name.replace("_", "-")):
+        if candidate in _BLOCKS:
+            return _BLOCKS[candidate]
+    raise KeyError(f"No block registered under '{name}'. Available: {sorted(_BLOCKS)}")
 
 
 def get_scorer(name: str) -> type:
@@ -87,8 +90,8 @@ def _clear_for_tests() -> None:
 
 
 def discover_in_project(project_root: Any) -> None:
-    """Import every Python module under priors/, evals/ and models/ so
-    decorators register (priors, scorers, blocks).
+    """Import every Python module under priors/, evals/, models/ and blocks/
+    so decorators register (priors, scorers, blocks).
 
     project_root: pathlib.Path — typed loosely to avoid an import cycle.
     """
@@ -96,7 +99,7 @@ def discover_in_project(project_root: Any) -> None:
     from pathlib import Path
 
     root = Path(project_root)
-    for sub in ("priors", "evals", "models"):
+    for sub in ("priors", "evals", "models", "blocks"):
         d = root / sub
         if not d.exists():
             continue
