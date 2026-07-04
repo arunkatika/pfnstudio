@@ -1,0 +1,23 @@
+id: sanity_run
+description: >
+  Sanity run — a quick end-to-end check that the custom-block model assembles,
+  trains, and the in_context_regression_ols eval scores against closed-form OLS.
+  Short (500 steps, ~10s on CPU); bump `steps` toward ~4000 for a converged PFN.
+prior:
+  id: bayesian_linear
+  version: 0.1.0
+model:
+  id: demo_model
+  version: 0.1.0
+evals:
+  - id: in_context_regression_ols
+    version: 0.1.0
+hyperparams:
+  optimizer: adamw
+  lr: 0.0003
+  batch_size: 32
+  steps: 500
+  seed: 42
+compute:
+  target: local
+tracking: {}

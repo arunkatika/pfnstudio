@@ -1,0 +1,40 @@
+id: demo_model
+name: In-context regression with a custom block
+version: 0.1.0
+description: >
+  A small in-context regression PFN with ONE researcher-defined block
+  (gated_residual) inserted after the encoder — to show a custom block composed
+  into a real, trainable, scored model. gated_residual is project code
+  (blocks/gated_residual.py), not a pfnstudio-core built-in. A per-token
+  scalar_head predicts y at each query position; loss is computed at query
+  positions only. Sized to converge on CPU in ~1 minute.
+
+input_shape: "(B, N, 3)"
+
+blocks:
+  - type: tabular_embedder
+    name: embed
+    config:
+      d_model: 64
+  - type: transformer_encoder
+    name: encoder
+    config:
+      d_model: 64
+      n_heads: 4
+      n_layers: 3
+      dropout: 0.0
+  # ── the custom, project-defined block ──
+  - type: gated_residual
+    name: refine
+    config:
+      d_model: 64
+      hidden_mult: 2
+  - type: scalar_head
+    name: head
+    config:
+      d_model: 64
+      d_out: 1
+
+output_heads:
+  - name: pred_y
+    task: regression

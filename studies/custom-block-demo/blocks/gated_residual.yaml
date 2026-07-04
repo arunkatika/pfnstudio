@@ -1,0 +1,22 @@
+# Optional metadata sidecar for a custom block. The .py is the source of
+# truth for the code; this drives the display + the composer's config inputs.
+type: gated_residual
+name: Gated residual
+description: x + sigmoid(gate(x)) * mlp(x) — a shape-preserving gated residual update you can drop between encoder layers.
+isHead: false
+fields:
+  - key: d_model
+    label: d_model
+    kind: number
+    default: 256
+    min: 16
+    step: 16
+    hint: hidden dimension (match the encoder)
+  - key: hidden_mult
+    label: hidden_mult
+    kind: number
+    default: 2
+    min: 1
+    step: 1
+    hint: MLP inner width = d_model × hidden_mult
+citations: []

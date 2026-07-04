@@ -1,0 +1,51 @@
+id: bayesian_linear
+name: Bayesian linear regression (packed for in-context PFN)
+version: 0.1.0
+kind: tabular
+description: |
+  y = a*x + b + ε, with (a, b) ~ N(0, weight_std) and ε ~ N(0, noise_scale).
+  Each sample is packed as a (context, query) token sequence so the default
+  training step does in-context regression: the transformer attends from
+  query positions to context positions; loss is computed only at queries.
+
+  This is the canonical PFN setup. The closed-form Bayesian posterior is
+  available analytically (OLS) for benchmarking — a correctly trained PFN
+  should approach the OLS solution in a single forward pass, having never
+  seen the (a, b) values that generated the task.
+
+parameters:
+  num_points:
+    type: int
+    range: [64, 64]
+    description: Total points per task (context + query, packed in one sequence).
+  weight_std:
+    type: float
+    range: [0.5, 1.5]
+    description: Std-dev of the (a, b) prior — controls how varied tasks are.
+  noise_scale:
+    type: float
+    range: [0.05, 0.2]
+    description: Observation noise std-dev — controls the irreducible MSE floor.
+  x_range:
+    type: float
+    range: [1.0, 3.0]
+    description: x is drawn uniformly from [-x_range, +x_range].
+
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, 3)"
+      description: Packed (x, y_or_0, is_context_flag) tokens.
+    - name: y
+      type: tensor
+      shape: "(n_query,)"
+      description: Targets for the query positions only.
+    - name: n_ctx
+      type: scalar
+      description: Boundary index — the default training step slices logits here.
+
+citations:
+  - mueller2022pfn
+
+implementation: prior.py
