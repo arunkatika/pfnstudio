@@ -9,6 +9,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 cd "$REPO_ROOT"
 
+echo "→ Installing prior deps (networkx)..."
+pip install -q -r "studies/do-pfn/priors/do_pfn_scm/requirements.txt"
+
 echo "→ Validating prior + model + run spec..."
 pfnstudio validate "studies/do-pfn/priors/do_pfn_scm/"
 

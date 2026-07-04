@@ -17,20 +17,23 @@ directory; nothing is hidden in the binary.
 
 | What | State |
 |---|---|
-| Prior — `do_pfn_scm` (MLP-SCM with confounded propensity + outcome) | ✅ Faithful reimplementation from the paper (no upstream code copied) |
-| Model — 6-layer Do-PFN (d=192) | ✅ Uses PFN Studio's `transformer_encoder` + `scalar_head` |
+| Prior — `do_pfn_scm` (random-DAG SCM, confounded propensity + outcome) | ✅ Faithful reimplementation from the paper (no upstream code copied). Needs `networkx` — see `priors/do_pfn_scm/requirements.txt` |
+| Model — 12-layer axial-attention Do-PFN (d=192) | ✅ Paper-faithful primitives: `grid_preprocessor` → `tabular_cell_embedder` → `axial_attention_block × 12` → `row_pool_for_head` → `bar_distribution_head` |
+| Bar-distribution head | ✅ Project block (`blocks/bar_distribution_head.py`) — full outcome distribution over 100 equal-mass buckets, bucketized NLL |
 | Run — paper-pinned hyperparams | ✅ `lr=5e-4, bs=32, AdamW, wd=1e-5, clip=1.0, steps=12000` |
-| Eval — CID + CATE recovery vs naive + oracle | ✅ |
+| Eval — CID + CATE recovery vs naive + oracle | ✅ `evals/cid_recovery.py` scorer |
 | Results table | ⏳ Pending first end-to-end run on H100/H200 |
 | v0.2 — real-data benchmarks (IHDP, Twins) | 🗺️ Roadmapped |
 
 ## What this study does
 
-1. **Draws synthetic SCM tasks**: each task is a fresh random SCM with
-   - X ∈ ℝ¹⁰ drawn from N(0, Σ) with random block correlation
-   - Unobserved confounder U coupled into both the propensity and the outcome
-   - Binary treatment T ~ Bernoulli(propensity(X, U))
-   - Continuous outcome Y(X, T, U) + ε via a random 2-layer MLP
+1. **Draws synthetic SCM tasks**: each task is a fresh **random DAG** with
+   - A sparse random directed acyclic graph over K = d + unobserved + 2 nodes
+   - Covariates X ∈ ℝ⁶ read off non-treatment/outcome nodes
+   - Unobserved confounder node(s) coupled into both treatment and outcome
+   - A binarized treatment node T (chosen among nodes with descendants)
+   - The outcome Y read off a descendant of T; structural equations are
+     random linear maps through γ ∈ {x², tanh, ReLU} nonlinearities + noise
 2. **Packs each task as a (context, query) sequence**:
    - Context tokens carry the **observational** distribution `(X, T_obs, Y_obs)`
    - Query tokens carry the **desired intervention** `(X, t_query, 0)`
@@ -78,6 +81,7 @@ Numbers fill in on first end-to-end run.
 pip install "pfnstudio-core[torch]" pfnstudio
 git clone https://github.com/profitopsai/pfnstudio
 cd pfnstudio
+pip install -r studies/do-pfn/priors/do_pfn_scm/requirements.txt   # networkx
 
 pfnstudio validate studies/do-pfn/priors/do_pfn_scm/
 pfnstudio run      studies/do-pfn/runs/v0_1.yaml
@@ -99,13 +103,18 @@ studies/do-pfn/
 ├── priors/
 │   └── do_pfn_scm/
 │       ├── prior.yaml
-│       └── prior.py            ← faithful reimplementation of the paper's SCM family
+│       ├── prior.py            ← random-DAG SCM sampler (paper Algorithm 1)
+│       └── requirements.txt    ← networkx (installed before the prior imports)
+├── blocks/
+│   ├── bar_distribution_head.py   ← project block: distributional output head
+│   └── bar_distribution_head.yaml
 ├── models/
-│   └── do_pfn.yaml             ← 6-layer transformer (d=192, h=8)
+│   └── do_pfn.yaml             ← axial-attention transformer (d=192, 12 layers)
 ├── runs/
 │   └── v0_1.yaml               ← paper-pinned hparams
 └── evals/
-    └── cid_recovery.yaml       ← CID + CATE vs naive + oracle
+    ├── cid_recovery.yaml       ← CID + CATE vs naive + oracle
+    └── cid_recovery.py         ← the scorer (@register_scorer)
 ```
 
 ## What this study does *not* show (yet)
@@ -118,10 +127,10 @@ studies/do-pfn/
   This v0.1 trains on fresh-per-step batches for 12k steps — same
   prior family, less data, faster turnaround. Useful to validate the
   mechanism; not a competitive headline number.
-- **Distributional outputs.** Do-PFN's `predict_full` returns a full
-  distribution; this v0.1 uses a `scalar_head` for point estimates
-  (the trainer's MSE loss). A v0.2 with a quantile head would match
-  the paper's full-CID output more faithfully.
+- **Real-data + paper-scale, as above.** Distributional outputs *are*
+  shipped: the model's `bar_distribution_head` predicts a full outcome
+  distribution over 100 equal-mass buckets (bucketized NLL), and the
+  point estimate used for scoring is the distribution mean.
 
 ## Reproducibility
 

@@ -1,0 +1,24 @@
+# Metadata sidecar for the bar-distribution head. The .py is the source of
+# truth for the code; this drives the display + the composer's config inputs.
+type: bar_distribution_head
+name: Bar-distribution head
+description: Distributional regression head — predicts a full outcome distribution over num_buckets equal-mass buckets (Müller et al. 2022; the head TabPFN/Do-PFN use). Trains with bucketized NLL and reports the distribution mean at inference.
+isHead: true
+fields:
+  - key: d_model
+    label: d_model
+    kind: number
+    default: 192
+    min: 16
+    step: 16
+    hint: hidden dimension (match the encoder)
+  - key: num_buckets
+    label: num_buckets
+    kind: number
+    default: 100
+    min: 10
+    step: 10
+    hint: number of outcome buckets (borders fit to the prior at setup)
+citations:
+  - mueller2022pfn
+  - robertson2025dopfn

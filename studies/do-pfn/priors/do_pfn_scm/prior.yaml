@@ -1,114 +1,89 @@
 id: do_pfn_scm
-name: Do-PFN SCM prior (Robertson et al., 2025)
+name: Do-PFN SCM prior
 version: 0.1.0
-kind: tabular
-description: |
-  Synthetic SCM prior for in-context interventional outcome prediction.
-  Each sample is one DGP — a draw from a structural causal model with:
-
-    X  ~ N(0, Σ_d)          ← d observed covariates with correlated structure
-    U  ~ N(0, 1)            ← unobserved confounder coupled into both T and Y
-    π(X, U)  = sigmoid(MLP_T(X, U))                 ← propensity
-    T  ~ Bernoulli(π(X, U))
-    Y0       = MLP_Y(X, 0, U) + ε                   ← potential outcome | do(T=0)
-    Y1       = MLP_Y(X, 1, U) + ε                   ← potential outcome | do(T=1)
-    Y        = T · Y1 + (1 - T) · Y0                ← observed
-    CID(t)   = p(Y | do(T=t), X)                    ← interventional dist.
-    CATE     = E_U[Y1 - Y0 | X]                     ← treatment effect
-
-  Each task is packed as a (context, query) sequence the transformer
-  attends across. Context tokens carry the OBSERVATIONAL distribution
-  (X, T, Y); query tokens carry X and the desired intervention t. The
-  trainer's target is the INTERVENTIONAL outcome Y under that
-  intervention — drawn cleanly from the SCM (the observed Y_obs is
-  used only at context positions).
-
-  Key paper claim — the model learns to predict CIDs from observational
-  data alone, without being shown the causal graph. v0.1 of this prior
-  encodes the simplest faithful version of that claim.
-
-  Cited:
-    Robertson, J., Reuter, A., Guo, S., Hollmann, N., Hutter, F.,
-    Schölkopf, B. (2025). Do-PFN: In-Context Learning for Causal Effect
-    Estimation. NeurIPS 2025. arXiv:2506.06039
-
+kind: causal_intervention
+description: Random-DAG structural causal model (paper-faithful, Robertson et al. 2025). Samples a fresh sparse DAG per task, picks a treatment node with descendants as the outcome, binarizes treatment, and emits packed (context, query) tokens where context carries observational (X, T_obs, Y_obs) and query carries (X, t_intervention, masked). Training target is the interventional outcome Y under do(T=t_query).
 parameters:
   num_features:
     type: int
-    range: [10, 10]
-    description: Dimension d of the observed covariate X.
+    range:
+      - 6
+      - 6
+    description: Dimension d of observed covariate X (columns 0..d-1).
   num_samples:
     type: int
-    range: [256, 256]
-    description: Points per task (context + query, packed in one sequence).
+    range:
+      - 2200
+      - 2200
+    description: Points per task (context + query).
   ctx_frac:
     type: float
-    range: [0.75, 0.75]
-    description: Fraction used as context; the rest are intervention queries.
-  outcome_hidden:
+    range:
+      - 0.75
+      - 0.75
+    description: Fraction of points used as context; the rest are queries.
+  num_unobserved:
     type: int
-    range: [32, 32]
-    description: Width of the outcome MLP's hidden layer.
-  propensity_hidden:
+    range:
+      - 1
+      - 1
+    description: Latent (unobserved) confounder nodes added to the DAG.
+  K_max:
     type: int
-    range: [16, 16]
-    description: Width of the propensity MLP's hidden layer.
-  u_strength:
-    type: float
-    range: [0.5, 2.0]
-    description: |
-      Per-task confounding magnitude — drawn uniform so the model sees
-      a range of confounding regimes (the paper's "varying base rates").
-  cov_correlation:
-    type: float
-    range: [0.0, 0.5]
-    description: |
-      Block-correlation strength for X. Real-world covariates aren't
-      independent; the paper trains across a distribution of
-      correlation regimes.
-  noise_scale:
-    type: float
-    range: [0.1, 0.3]
-    description: Std-dev of observation noise on Y.
-  intervention_t:
-    type: float
-    range: [0.0, 1.0]
-    description: |
-      Per-query intervention value. Binary (0 or 1) at sample time,
-      drawn 50/50 unless overridden by the trainer for paired-query
-      evaluation.
-
+    range:
+      - 10
+      - 10
+    description: Cap on total DAG nodes K = num_features + num_unobserved + 2.
+  min_ctx:
+    type: int
+    range:
+      - 10
+      - 10
+    description: Lower bound when varying context length per batch.
+  max_retries:
+    type: int
+    range:
+      - 5
+      - 5
+    description: Resamples if a drawn DAG yields a degenerate (non-finite) task.
+  num_features_min:
+    type: int
+    range:
+      - 1
+      - 1
+    description: Lower bound when varying feature count per batch.
+  num_features_max:
+    type: int
+    range:
+      - 6
+      - 6
+    description: Upper bound when varying feature count per batch.
+  __compatible_task_types__:
+    - cate
+    - regression
 outputs:
   variables:
     - name: X
       type: tensor
-      shape: "(N, d+3)"
-      description: |
-        Packed token = (x_1, ..., x_d, t_or_intervention, y_obs_or_0, is_context_flag).
-        Context tokens carry observed T and Y; query tokens carry the
-        DESIRED intervention t and have y masked to 0 + is_context_flag=0.
+      shape: (N, d+2)
+      description: Cols 0..d-1 = covariates, col d = treatment t (0/1), col d+1 = y (real on train rows, NaN on query rows for in-context learning).
     - name: y
       type: tensor
-      shape: "(n_query,)"
-      description: |
-        Target interventional outcome at the query positions —
-        Y_{do(T=t)} drawn cleanly from the SCM. The model's job is to
-        predict this from the observational context alone.
+      shape: (N - n_ctx,)
+      description: Loss target — true interventional outcome at QUERY positions only. The trainer's regression branch reads n_qry from this field's length and slices the model output to match. Context-position y values live inside X as the y-feature column (NaN at queries, so the preprocessor mean-imputes them — the in-context learning signal).
     - name: n_ctx
       type: scalar
-      description: Boundary index — the default training step slices logits here.
+      description: Boundary index — trainer threads as single_eval_pos to n_ctx-aware blocks (GridPreprocessor, AxialAttentionBlock) and slices logits here.
     - name: cate_true
       type: tensor
-      shape: "(num_samples,)"
-      description: |
-        Latent CATE for every point in the task — convenience field for
-        eval; not the training target (the target is the chosen-
-        intervention Y, not the CATE difference).
-    - name: u_strength
+      shape: (num_samples,)
+      description: Latent CATE for eval (NOT the training target) — the paired interventional-minus-observational contrast. The prior inspector renders this as the headline histogram for causal_intervention priors.
+    - name: adjacency
+      type: tensor
+      shape: (K, K)
+      description: "Random DAG that generated this task — adj[i,j]=1 means node i → node j. Used by the prior-inspector's DAG view (expand-pane only). Inert during training: the trainer only consumes X / y / n_ctx / cate_true."
+    - name: task_meta
       type: scalar
-      description: Per-task confounding strength — useful for stratified eval.
-
+      description: "Per-task metadata dict: K (num nodes), num_features, num_unobserved, edge_density, p_edge, t_idx (treatment column), y_idx (outcome column), x_indices, sigma_exo, sigma_eps. Used by the inspector's caption + DAG view to highlight the treatment/outcome nodes."
 citations:
   - robertson2025dopfn
-
-implementation: prior.py

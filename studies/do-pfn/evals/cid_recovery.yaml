@@ -1,76 +1,41 @@
 id: cid_recovery
 name: CID + CATE recovery — Do-PFN vs naive vs oracle
 version: 0.1.0
-task: regression
-description: |
-  After training, draw 50 fresh DGPs from the same prior. For each one,
-  the scorer evaluates BOTH the headline tasks Do-PFN claims:
-
-    - **CID recovery** — query the model on interventional outcomes
-      Y_{do(T=t)} for t ∈ {0, 1} and compare to the SCM's ground-truth
-      Y_int. Per-query MSE against the oracle.
-    - **CATE recovery** — derive CATE = Y_{do(T=1)} - Y_{do(T=0)} from
-      two paired queries on the same X. Compare to the latent CATE
-      (Monte-Carlo integrated over U inside the prior). The paper's
-      headline derived quantity.
-
-  Baselines:
-    - **naive**: per-task ridge regression of E[Y|T=1,X] - E[Y|T=0,X]
-      fit on the OBSERVED context. Biased under unobserved confounding
-      — Do-PFN's edge is supposed to be in beating this even though it
-      saw no causal graph.
-    - **oracle**: latent CATE the prior emits as `cate_true`. Floor on
-      achievable MSE.
-
-  Headline numbers:
-    - cid_mse — pred Y vs oracle Y_int across query positions
-    - cate_mse — pred CATE vs latent CATE
-    - ratio_vs_naive_cate — naive_cate_mse / pfn_cate_mse (should be > 1)
-    - ratio_vs_oracle_cate — pfn_cate_mse / oracle_cate_mse (closer to 1 = better)
-
+task: cate
+description: 50 fresh DGPs from the same prior. Scores both interventional outcome prediction (CID-MSE) and derived CATE (paired do(0)/do(1) queries) against the SCM's ground-truth Y_int and latent CATE. Compared to per-task ridge regression (biased baseline) and the oracle.
 dataset:
-  name: synthetic-fresh-prior-draws
-  source: ""
-  split: ""
-
+  name: synthetic_fresh_prior_draws
+  source: priors/do_pfn_scm_studio
+  version: 0.1.0
+  split: test
 metrics:
   - name: cid_mse
     higher_is_better: false
-    description: |
-      Mean squared error of predicted interventional outcomes against
-      the oracle Y_int. Per-query.
+    description: PFN interventional outcome vs oracle Y_int
   - name: cate_mse
     higher_is_better: false
-    description: |
-      MSE of predicted CATE (derived from paired do(0) / do(1) queries)
-      against latent CATE.
+    description: PFN-derived CATE vs latent CATE
   - name: naive_cate_mse
     higher_is_better: false
-    description: |
-      Per-task ridge regression baseline — biased under confounding.
-      This is the "real-world baseline that has access to the data
-      but no causal-graph information" Do-PFN claims to beat.
+    description: Per-task ridge baseline — biased under confounding
   - name: oracle_cate_mse
     higher_is_better: false
-    description: Latent CATE — MC-integration floor (≈ 0).
+    description: Latent CATE — MC-integration floor
   - name: ratio_vs_naive_cate
     higher_is_better: true
-    description: |
-      naive_cate_mse / cate_mse — how many times better than the
-      confounded observational estimator.
+    description: naive_cate_mse / cate_mse — beats-naive multiplier
   - name: ratio_vs_oracle_cate
     higher_is_better: false
-    description: |
-      cate_mse / oracle_cate_mse — closeness to perfect causal
-      recovery.
-
+    description: cate_mse / oracle_cate_mse — closeness to perfect causal recovery
+  - name: ate_error
+    higher_is_better: false
+    description: "|mean model CATE − mean latent CATE| — average treatment-effect bias"
 baselines:
   - name: naive (per-task ridge)
-    score: 0.0
+    score: 0
     source: fitted_per_task
   - name: oracle (latent CATE)
-    score: 0.0
+    score: 0
     source: monte_carlo
-
 citations:
   - robertson2025dopfn

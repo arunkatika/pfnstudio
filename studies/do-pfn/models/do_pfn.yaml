@@ -1,42 +1,113 @@
 id: do_pfn
-name: Do-PFN (6-layer interventional outcome transformer)
+name: Do-PFN — axial-attention transformer (Robertson et al., 2025)
 version: 0.1.0
-description: |
-  6-layer transformer encoder, d_model=192, 8 heads. Token width is
-  auto-inferred via LazyLinear inside the tabular_embedder (d_in = d+3
-  = 13 for d=10).
+description: "PFN Studio reproduction of Do-PFN (Robertson et al., NeurIPS 2025). Paper-faithful architecture composed from the studio block library: grid_preprocessor → tabular_cell_embedder → 12× axial_attention_block → row_pool_for_head → bar_distribution_head. Each axial block applies row-axis attention (cells within a row attend to each other) then column-axis attention (each cell in a column attends to other rows via train/test KV cache), then a position-wise MLP. d_model=192, n_heads=6, ff_mult=4 — same as the paper. The bar-distribution head (a project block) predicts a full outcome distribution over 100 equal-mass buckets per query position — trained with bucketized NLL, reported as the distribution mean; loss at query positions only via the in-context y-feature column."
+narrative: |-
+  Given a table of "things that happened" — process settings, conditions, outcomes — it answers: *"if I do X instead of Y, what's the predicted outcome?"* without ever being told the causal rules.
 
-  Architecture matches Do-PFN's paper-stated TabPFN-style backbone at
-  a comfortable mid-size — bigger than v0.1 of causal-sensitivity-pfn
-  (d=128, 4 layers) because the paper's claim about CID prediction
-  benefits from more capacity. Trains in ~25-35 min on a single
-  H100/H200 for the v0.1 hyperparams.
+  The pipeline is five stages:
 
-input_shape: "(B, N, 13)"
+    1. **preprocess** — clean the table: fill in missing values, put everything on the same scale.
+    2. **embed** — turn each number into a richer "fingerprint" the rest of the model can reason with (so `75.3` isn't just a number, it carries context).
+    3. **L1 → L12** — the thinking. Each of 12 layers does two things: **row attention** ("this temperature relates to that pressure at the same time") and **column attention** ("this temperature at hour 100 relates to other temperatures across history"). Stacking 12 layers is like reading the table 12 times.
+    4. **pool** — once the model has thought hard, grab the cell that represents "the answer."
+    5. **head** — turn that cell into a single number prediction.
 
+  What makes this different from a normal ML model: a normal model is trained to predict yield from temperature in *your* factory. Do-PFN was trained on millions of *made-up* factories, so it learned how to do causal reasoning in general. You hand it your factory's data at runtime, it figures out your specific patterns on the fly. No retraining. No graph required.
+inputShape: (B, N, d+2)
 blocks:
-  - type: tabular_embedder
+  - type: grid_preprocessor
+    name: preprocess
+    config: {}
+  - type: tabular_cell_embedder
     name: embed
     config:
       d_model: 192
-  - type: transformer_encoder
-    name: encoder
+      features_per_group: 85
+  - type: axial_attention_block
+    name: L1
     config:
       d_model: 192
-      n_heads: 8
-      n_layers: 6
+      n_heads: 6
       ff_mult: 4
-      dropout: 0.0
-  - type: scalar_head
+  - type: axial_attention_block
+    name: L2
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L3
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L4
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L5
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L6
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L7
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L8
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L9
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L10
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L11
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: axial_attention_block
+    name: L12
+    config:
+      d_model: 192
+      n_heads: 6
+      ff_mult: 4
+  - type: row_pool_for_head
+    name: pool
+    config:
+      target_col: 0
+  - type: bar_distribution_head
     name: head
     config:
       d_model: 192
-      d_out: 1
-
-output_heads:
+      num_buckets: 100
+outputHeads:
   - name: pred_intervention
     task: regression
-
 citations:
   - robertson2025dopfn
   - mueller2022pfn
