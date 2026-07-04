@@ -1,4 +1,4 @@
-"""Decorator-based registries for priors, architecture blocks, and evals."""
+"""Decorator-based registries for priors, architecture blocks, and scorers."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ T = TypeVar("T")
 
 _PRIORS: dict[str, type] = {}
 _BLOCKS: dict[str, type] = {}
-_EVALS: dict[str, type] = {}
+_SCORERS: dict[str, type] = {}
 
 
 def _register(table: dict[str, type], name: str) -> Callable[[type[T]], type[T]]:
@@ -32,9 +32,14 @@ def register_block(name: str) -> Callable[[type[T]], type[T]]:
     return _register(_BLOCKS, name)
 
 
-def register_eval(name: str) -> Callable[[type[T]], type[T]]:
-    """Register an Eval subclass so YAML specs can reference it by `id`."""
-    return _register(_EVALS, name)
+def register_scorer(name: str) -> Callable[[type[T]], type[T]]:
+    """Register a DatasetScorer subclass so an eval slug resolves to it.
+
+    Ship a scorer in a template beside its eval spec — `evals/<slug>.py`
+    with `@register_scorer("<slug>")` — and `discover_in_project` imports it
+    at run time. Paper-specific scorers live in the template, not core.
+    """
+    return _register(_SCORERS, name)
 
 
 def get_prior(name: str) -> type:
@@ -54,10 +59,13 @@ def get_block(name: str) -> type:
     return _BLOCKS[name]
 
 
-def get_eval(name: str) -> type:
-    if name not in _EVALS:
-        raise KeyError(f"No eval registered under '{name}'. Available: {sorted(_EVALS)}")
-    return _EVALS[name]
+def get_scorer(name: str) -> type:
+    # Tolerate `-` ↔ `_` swaps, same as get_prior: the DB slugifier uses `-`
+    # but decorators register idiomatic snake_case.
+    for candidate in (name, name.replace("-", "_"), name.replace("_", "-")):
+        if candidate in _SCORERS:
+            return _SCORERS[candidate]
+    raise KeyError(f"No scorer registered under '{name}'. Available: {sorted(_SCORERS)}")
 
 
 def list_priors() -> list[str]:
@@ -68,18 +76,19 @@ def list_blocks() -> list[str]:
     return sorted(_BLOCKS)
 
 
-def list_evals() -> list[str]:
-    return sorted(_EVALS)
+def list_scorers() -> list[str]:
+    return sorted(_SCORERS)
 
 
 def _clear_for_tests() -> None:
     _PRIORS.clear()
     _BLOCKS.clear()
-    _EVALS.clear()
+    _SCORERS.clear()
 
 
 def discover_in_project(project_root: Any) -> None:
-    """Import every Python module under priors/ and evals/ so decorators register.
+    """Import every Python module under priors/, evals/ and models/ so
+    decorators register (priors, scorers, blocks).
 
     project_root: pathlib.Path — typed loosely to avoid an import cycle.
     """

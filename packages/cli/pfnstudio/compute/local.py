@@ -168,6 +168,7 @@ class LocalAdapter(ComputeAdapter):
         execute it. Returns slug → serialisable result dict suitable for
         merging into the run's `results.evals` JSON column."""
         from pfnstudio_core.loaders import load_eval
+        from pfnstudio_core.registry import get_scorer
         from pfnstudio_core.scorers import BUILTIN_SCORERS
 
         out: dict[str, dict[str, Any]] = {}
@@ -184,10 +185,23 @@ class LocalAdapter(ComputeAdapter):
                 _emit_log(f"eval {eval_id} skipped: could not load spec ({e})")
                 continue
 
-            scorer = BUILTIN_SCORERS.get(eval_spec.id) or BUILTIN_SCORERS.get(eval_id)
+            # Resolve the scorer: a template-shipped @register_scorer (loaded by
+            # discover_in_project in submit()) wins, so paper-specific scorers
+            # live in the template; core's BUILTIN_SCORERS are the generic
+            # fallback. This is the single scoring path — there is no separate
+            # Eval.score contract anymore.
+            scorer: Any = None
+            for key in (eval_spec.id, eval_id):
+                try:
+                    scorer = get_scorer(key)()
+                    break
+                except KeyError:
+                    continue
             if scorer is None:
-                # No built-in scorer for this slug — fine, the eval is
-                # synthetic-only or a future per-template scorer.
+                scorer = BUILTIN_SCORERS.get(eval_spec.id) or BUILTIN_SCORERS.get(eval_id)
+            if scorer is None:
+                # No scorer for this slug — fine, the eval is synthetic-only
+                # (metadata card with no real-data scoring step).
                 continue
 
             try:

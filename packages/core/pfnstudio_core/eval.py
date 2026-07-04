@@ -1,9 +1,9 @@
-"""Eval abstraction. An Eval is a benchmark configuration plus a scoring function."""
+"""Eval spec — the declarative benchmark definition (dataset + metrics +
+baselines). The *scoring* half lives in a DatasetScorer (scorers/base.py),
+bound to an eval by slug via @register_scorer. One "eval" = one spec; one
+"scorer" = the code that fills it. There is no second scoring contract."""
 
 from __future__ import annotations
-
-from abc import ABC, abstractmethod
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -37,13 +37,3 @@ class EvalSpec(BaseModel):
     metrics: list[MetricSpec]
     baselines: list[BaselineEntry] = Field(default_factory=list)
     citations: list[str] = Field(default_factory=list)
-
-
-class Eval(ABC):
-    """Subclass and decorate with @register_eval(\"<id>\") to bind to an EvalSpec."""
-
-    spec: EvalSpec
-
-    @abstractmethod
-    def score(self, predictions: Any, ground_truth: Any) -> dict[str, float]:
-        """Return a dict keyed by metric name, matching `spec.metrics[*].name`."""

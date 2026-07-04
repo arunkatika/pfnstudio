@@ -17,19 +17,19 @@ from .axes import (
     train_detector,
 )
 from .datasets import DatasetUnavailable, RegistryDatasetLoader
-from .eval import Eval, EvalSpec
+from .eval import EvalSpec
 from .model import Model, ModelSpec
 from .prior import Prior, PriorSpec
 from .registry import (
     get_block,
-    get_eval,
     get_prior,
+    get_scorer,
     list_blocks,
-    list_evals,
     list_priors,
+    list_scorers,
     register_block,
-    register_eval,
     register_prior,
+    register_scorer,
 )
 from .run import Run, RunSpec
 
@@ -40,7 +40,6 @@ __all__ = [
     "Axis",
     "AxisDetector",
     "DatasetUnavailable",
-    "Eval",
     "EvalSpec",
     "Model",
     "ModelSpec",
@@ -53,17 +52,17 @@ __all__ = [
     "encode_tag",
     "get_axis",
     "get_block",
-    "get_eval",
     "get_prior",
+    "get_scorer",
     "is_unknown",
     "list_axes",
     "list_blocks",
-    "list_evals",
     "list_priors",
+    "list_scorers",
     "register_axis",
     "register_block",
-    "register_eval",
     "register_prior",
+    "register_scorer",
     "sample_tag",
     "tag_dim",
     "train_detector",
