@@ -1,0 +1,57 @@
+id: cascade_discovery
+name: Cascade discovery encoder (tabular SCM → adjacency)
+version: 0.1.0
+description: "In-context structure-discovery PFN for tabular SCMs. Embeds each observation row, mixes them with a 3-layer transformer encoder, pools the context into one graph-level vector, then projects to a (V, V) adjacency via the discovery head. Trained with BCE against the prior's ground-truth A. num_variables on the discovery head is auto-aligned to the prior's d at run time (52 for the TE-class cascade prior). Mirrors the canonical linear-scm discovery stack."
+narrative: |-
+  You hand it a table of process readings — many rows of sensor values — and it answers a structural question: *which variable drives which?* It returns a directed graph over the columns, not a per-row prediction.
+
+  The pipeline is four stages:
+
+    1. **embed** — turn each row of raw numbers into a richer fingerprint the encoder can reason with.
+    2. **enc1 → enc3** — the thinking. Three transformer layers let every observation attend to the others, so the model reads the whole table at once and forms a picture of how the columns co-move.
+    3. **pool** — collapse all that into a single "what's the structure here" vector.
+    4. **discover** — project that vector into a V×V grid of edge scores: the recovered causal graph.
+
+  Trained on millions of synthetic feed-forward processes (the cascade prior), it learns to recover structure in general — then reads your specific process's table at inference and emits its DAG. No retraining, no graph supplied.
+inputShape: (B, N, V)
+blocks:
+  - type: tabular_embedder
+    name: embed
+    config:
+      d_model: 128
+  - type: transformer_encoder
+    name: enc1
+    config:
+      d_model: 128
+      n_heads: 4
+      n_layers: 1
+      ff_mult: 4
+  - type: transformer_encoder
+    name: enc2
+    config:
+      d_model: 128
+      n_heads: 4
+      n_layers: 1
+      ff_mult: 4
+  - type: transformer_encoder
+    name: enc3
+    config:
+      d_model: 128
+      n_heads: 4
+      n_layers: 1
+      ff_mult: 4
+  - type: causal_attention_pool
+    name: pool
+    config:
+      d_model: 128
+  - type: discovery_head
+    name: discover
+    config:
+      d_model: 128
+      num_variables: 52
+outputHeads:
+  - name: adjacency
+    task: discovery
+citations:
+  - downs1993tennessee
+  - zheng2018notears

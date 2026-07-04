@@ -1,0 +1,56 @@
+id: cascade_scm
+slug: cascade_scm
+name: "Cascade SCM Discovery"
+version: 0.1.0
+kind: tabular
+description: "Feed-forward layered structural causal models mimicking chemical-process topology (feeds → reactor → separator → product). The PFN outputs an adjacency matrix — pure structure discovery, no fitted edges."
+implementation: prior.py
+parameters:
+  num_points:
+    type: int
+    range: [100, 400]
+  d:
+    type: int
+    range: [10, 80]
+    description: "Number of variables (Tennessee-Eastman class: ~52)"
+  n_layers:
+    type: int
+    range: [3, 6]
+    description: "Sequential process stages (feeds → reactor → … → product)"
+  inter_layer_edge_prob:
+    type: float
+    range: [0.02, 0.30]
+    description: "Base probability of a forward edge between adjacent layers"
+  layer_gap_decay:
+    type: float
+    range: [0.1, 1.0]
+    description: "Edge probability decays by this factor per extra layer of gap"
+  intra_layer_edge_prob:
+    type: float
+    range: [0.0, 0.1]
+    description: "Sparse forward edges within a layer (kept acyclic by sub-index order)"
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: "(N, d)"
+    - name: A
+      type: tensor
+      shape: "(d, d) ∈ {0,1}"
+citations:
+  - downs1993tennessee
+
+marketplace:
+  tagline: "Recover the DAG behind a feed-forward chemical process"
+  longSummary: "Strictly feed-forward, layer-partitioned DAGs with gap-decayed inter-layer edges — the topology of Tennessee-Eastman-class processes (0 cycles, edges concentrated between adjacent stages). Variable counts scale to TE size (V≈52). Trains a discovery PFN to recover cascade structure that Erdős–Rényi priors systematically miss."
+  category: causal
+  tags:
+    - discovery
+    - graph
+    - structure
+    - cascade
+    - industrial
+  author:
+    name: "PFN Studio Team"
+    verified: true
+  featured: true

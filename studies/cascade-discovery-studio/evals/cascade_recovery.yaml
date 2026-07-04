@@ -1,0 +1,45 @@
+id: cascade_recovery
+name: Cascade-SCM structure recovery (TE class)
+version: 0.1.0
+task: discovery
+description: |
+  Causal discovery on fresh feed-forward, layer-partitioned SCMs sampled
+  from the cascade-scm prior — the Tennessee-Eastman-class topology (feeds
+  → reactor → separator → product) that Erdős–Rényi priors systematically
+  miss. Scores the recovered adjacency against the prior's ground-truth A
+  via AUROC / SHD / F1. Pairs with priors/cascade-scm.
+
+  Scored by cascade_recovery.py — the trained discovery head's (V, V) adjacency logits vs ground-truth A:
+  30 fresh SCMs from the run's prior, edge scores thresholded into an
+  adjacency, metrics against the synthetic ground truth.
+
+dataset:
+  name: synthetic_fresh_cascade_draws
+  source: priors/cascade-scm
+  version: 0.1.0
+  split: test
+
+metrics:
+  - name: auroc
+    higher_is_better: true
+    description: Area under ROC over edge presence vs ground-truth A.
+  - name: shd
+    higher_is_better: false
+    description: Structural Hamming Distance at the median-score threshold.
+  - name: f1
+    higher_is_better: true
+    description: F1 over edge presence at the median-score threshold.
+  - name: precision
+    higher_is_better: true
+    description: Edge-presence precision at the median-score threshold.
+  - name: recall
+    higher_is_better: true
+    description: Edge-presence recall at the median-score threshold.
+
+baselines:
+  - name: chance
+    score: 0.5
+    source: random_edge_scores
+
+citations:
+  - downs1993tennessee

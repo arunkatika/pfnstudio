@@ -1,0 +1,28 @@
+id: v0_1
+description: v0.1 — recover feed-forward cascade structure (TE class, V=52). 3-layer transformer discovery encoder, BCE against the prior's ground-truth adjacency. Scored by cascade_recovery (AUROC / SHD / F1) from the trained discovery head.
+prior:
+  id: cascade_scm
+  version: 0.1.0
+  overrides:
+    # Pin d so every task's adjacency is (52, 52): the trainer skips discovery
+    # batches whose A shape differs from the (pinned) discovery-head V, and 52
+    # matches Tennessee-Eastman's variable count.
+    d: 52
+model:
+  id: cascade_discovery
+  version: 0.1.0
+evals:
+  - id: cascade_recovery
+    version: 0.1.0
+hyperparams:
+  optimizer: adamw
+  lr: 0.0005
+  batch_size: 16
+  steps: 8000
+  weight_decay: 0.00001
+  clip_grad_norm: 1
+  seed: 42
+  eval_every: 1000
+compute:
+  target: vast
+tracking: {}
