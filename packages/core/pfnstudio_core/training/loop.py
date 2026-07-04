@@ -72,10 +72,14 @@ def _is_head_module(mod: Any) -> bool:
 
     Identified by class name (matching the registered block-type name),
     not isinstance — avoids a hard import of every head class here
-    and survives renames as long as the registered name is stable.
+    and survives renames as long as the registered name is stable. A
+    PROJECT head block can also opt in explicitly via ``is_head = True``
+    (duck-typed) when its class name doesn't end in "head".
     """
-    return type(mod).__name__.lower().endswith("head") or (
-        type(mod).__name__ in {"DiscoveryHead", "EstimationHead", "ScalarHead"}
+    return (
+        type(mod).__name__.lower().endswith("head")
+        or type(mod).__name__ in {"DiscoveryHead", "EstimationHead", "ScalarHead"}
+        or bool(getattr(mod, "is_head", False))
     )
 
 

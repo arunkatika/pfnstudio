@@ -575,6 +575,22 @@ def _pack_context_query(
     return np.concatenate([ctx_tok, q_tok], axis=0).astype(np.float32)
 
 
+def _head_to_prediction(model: Any):
+    """Return the model's head-level ``to_prediction`` reducer, or None.
+
+    A distributional head (e.g. a bar-distribution head that outputs
+    per-bucket logits) collapses its output to a point estimate via a
+    ``to_prediction(output) -> (..., 1)`` method. This finds the first
+    block exposing one so the regression predict path can apply it before
+    slicing the scalar channel. Generic: core names no specific head.
+    """
+    for _, mod in getattr(model, "modules", []):
+        fn = getattr(mod, "to_prediction", None)
+        if callable(fn):
+            return fn
+    return None
+
+
 def _forward_full_sequence(model: Any, seq: Any, tag_tensor: Any = None) -> Any:
     """Run the model on a packed sequence, returning the head output.
 
@@ -710,6 +726,15 @@ def _dispatch_inference(
                 raise ValueError(
                     "Model has no head producing scalar predictions — expected a scalar_head."
                 )
+            # Generic distributional-head reduction. A head that emits a
+            # distribution over buckets (e.g. a bar-distribution head, output
+            # shape (..., num_buckets)) exposes `to_prediction(output) ->
+            # (..., 1)` to collapse its logits to a point estimate. Duck-typed
+            # + OPTIONAL: a plain scalar_head has no such method, so `out`
+            # passes through unchanged and the channel-0 slice is the scalar.
+            reduce_fn = _head_to_prediction(model)
+            if reduce_fn is not None:
+                out = reduce_fn(out)
             preds = out[0, n_ctx:, 0].cpu().numpy().tolist()  # query positions only
         return {
             "task": "regression",
