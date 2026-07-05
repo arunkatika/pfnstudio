@@ -70,15 +70,16 @@ _HEAD_BLOCK_TYPE_NAMES: set[str] = {"discovery_head", "estimation_head", "scalar
 def _is_head_module(mod: Any) -> bool:
     """True iff `mod` is an output head (vs encoder block).
 
-    Identified by class name (matching the registered block-type name),
-    not isinstance — avoids a hard import of every head class here
-    and survives renames as long as the registered name is stable. A
-    PROJECT head block can also opt in explicitly via ``is_head = True``
-    (duck-typed) when its class name doesn't end in "head".
+    Identified by a STRICT class-name allowlist plus the ``is_head = True``
+    duck-type (which a project head declares). An earlier
+    ``__name__.endswith("head")`` heuristic over-matched: it classified
+    pooling stages like ``RowPoolForHead`` — which feed INTO a head but are
+    NOT heads — as parallel-fan-out heads, so a model with a pool before its
+    head assembled wrong (the head ran on the pre-pool encoder output,
+    surfacing as tensor-size mismatches).
     """
     return (
-        type(mod).__name__.lower().endswith("head")
-        or type(mod).__name__ in {"DiscoveryHead", "EstimationHead", "ScalarHead"}
+        type(mod).__name__ in {"DiscoveryHead", "EstimationHead", "ScalarHead"}
         or bool(getattr(mod, "is_head", False))
     )
 

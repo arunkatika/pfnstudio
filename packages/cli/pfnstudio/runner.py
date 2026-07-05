@@ -1336,7 +1336,33 @@ def start(
             console.print(f"[red]Malformed job payload:[/red] {data}")
             continue
 
-        _run_job(base, headers, job, project_root, stop_flag)
+        # Never let one job kill the runner. _run_job reports its own
+        # result on the normal + expected-failure paths; this catches
+        # anything that escapes (a bug in the executor, an unexpected
+        # exception) so the daemon logs it, best-effort marks the job
+        # failed, and keeps polling for the next one.
+        try:
+            _run_job(base, headers, job, project_root, stop_flag)
+        except Exception as exc:  # noqa: BLE001 — isolation is the whole point
+            run_id = job.get("runId")
+            console.print(
+                f"[red]Job {run_id} crashed the executor — failing it and "
+                f"continuing:[/red] {type(exc).__name__}: {exc}"
+            )
+            try:
+                requests.post(
+                    f"{base}/runner/jobs/{run_id}/result",
+                    json={
+                        "status": "error",
+                        "events": [],
+                        "error": f"runner executor error: {type(exc).__name__}: {exc}",
+                    },
+                    headers=headers,
+                    timeout=30,
+                )
+            except requests.RequestException:
+                pass
+            _update_state(currentJob=None)
         last_idle_log = time.time()
 
     _update_state(stoppedAt=_ts(), currentJob=None)

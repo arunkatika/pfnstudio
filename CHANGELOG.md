@@ -2,6 +2,17 @@
 
 Versions are per-package; tags are `core-v<version>` and `cli-v<version>`.
 
+## pfnstudio-core 0.9.2
+
+### Fixed
+- **Head detection no longer misclassifies pooling stages.** `_is_head_module`
+  used a loose `name.endswith("head")` heuristic, which treated
+  `RowPoolForHead` (a stage that feeds INTO a head) as a parallel output head.
+  A model with a pool before its head (e.g. Do-PFN's `row_pool_for_head` →
+  `bar_distribution_head`) then assembled wrong — the head ran on the pre-pool
+  encoder output — surfacing at eval time as `size of tensor a (192) must match
+  tensor b (100)`. Now a strict class-name allowlist + the `is_head` duck-type.
+
 ## pfnstudio-core 0.9.1
 
 ### Fixed
@@ -20,6 +31,12 @@ Versions are per-package; tags are `core-v<version>` and `cli-v<version>`.
     before falling back to MSE.
 
 ## pfnstudio 0.8.14
+
+### Fixed
+- **A failing job no longer stops the runner.** The main poll loop didn't wrap
+  `_run_job`, so an exception escaping the executor killed the whole daemon.
+  It's now isolated: the job is logged, best-effort marked failed on the cloud,
+  and the runner keeps polling.
 
 ### Added
 - **Runner per-job core sync (opt-in)** — a self-hosted runner can refresh
