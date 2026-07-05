@@ -17,20 +17,23 @@ directory; nothing is hidden in the binary.
 
 | What | State |
 |---|---|
-| Prior — `do_pfn_scm` (random-DAG SCM, confounded propensity + outcome) | ✅ Faithful reimplementation from the paper (no upstream code copied). Needs `networkx` — see `priors/do_pfn_scm/requirements.txt` |
+| Prior — `do_pfn_scm` (random-DAG SCM with latent-confounder nodes) | ✅ Faithful reimplementation from the paper (no upstream code copied). Needs `networkx` — see `priors/do_pfn_scm/requirements.txt` |
 | Model — 12-layer axial-attention Do-PFN (d=192) | ✅ Paper-faithful primitives: `grid_preprocessor` → `tabular_cell_embedder` → `axial_attention_block × 12` → `row_pool_for_head` → `bar_distribution_head` |
 | Bar-distribution head | ✅ Project block (`blocks/bar_distribution_head.py`) — full outcome distribution over 100 equal-mass buckets, bucketized NLL |
 | Run — paper-pinned hyperparams | ✅ `lr=5e-4, bs=32, AdamW, wd=1e-5, clip=1.0, steps=12000` |
-| Eval — CID + CATE recovery vs naive + oracle | ✅ `evals/cid_recovery.py` scorer |
-| Results table | ⏳ Pending first end-to-end run on H100/H200 |
-| v0.2 — real-data benchmarks (IHDP, Twins) | 🗺️ Roadmapped |
+| Eval — CID + CATE recovery vs naive + Monte-Carlo oracle, plus PICP calibration | ✅ `evals/cid_recovery.py` scorer — `cate_true` is the MC oracle `E[Y|do(1),X]−E[Y|do(0),X]` |
+| `pfnstudio validate` + `lint` | ✅ Pass. Pipeline (prior → 12-layer axial model → trainer → eval) verified end-to-end on CPU |
+| Results table | ⏳ Pending first full training run on GPU (H100/H200) |
+| v0.2 — real-data benchmarks (RealCause, Amazon, Law School) | 🗺️ Roadmapped |
 
 ## What this study does
 
 1. **Draws synthetic SCM tasks**: each task is a fresh **random DAG** with
-   - A sparse random directed acyclic graph over K = d + unobserved + 2 nodes
+   - A random directed acyclic graph over K = d + unobserved + 2 nodes
+     (edge density `p` sampled per task, so tasks range from sparse to dense)
    - Covariates X ∈ ℝ⁶ read off non-treatment/outcome nodes
-   - Unobserved confounder node(s) coupled into both treatment and outcome
+   - Latent (unobserved) node(s) — the K − d − 2 nodes not exposed as
+     covariates — which *may* confound T and Y depending on the draw
    - A binarized treatment node T (chosen among nodes with descendants)
    - The outcome Y read off a descendant of T; structural equations are
      random linear maps through γ ∈ {x², tanh, ReLU} nonlinearities + noise
@@ -42,10 +45,17 @@ directory; nothing is hidden in the binary.
    the SCM under the do-operation, never visible in the observational
    context.
 4. **Evaluates** on 50 fresh DGPs, scoring:
-   - **CID-MSE**: predicted Y vs oracle Y_int per query
-   - **CATE-MSE**: derived `pred Y do(1) - pred Y do(0)` vs latent CATE
+   - **CID-MSE** (+ range-normalized **CID-NMSE**, the paper's primary
+     metric): predicted Y vs oracle Y_int per query
+   - **CATE-MSE / -NMSE**: derived `pred Y do(1) - pred Y do(0)` vs the
+     **Monte-Carlo oracle CATE** `E[Y|do(1),X] − E[Y|do(0),X]` (integrated
+     over the exogenous noise with covariates pinned per row — *not* a
+     single-draw contrast)
+   - **PICP**: the paper's uncertainty metric — how often the true
+     interventional Y lands in the bar head's central 90% predictive
+     interval (well-calibrated ⇒ ≈0.90)
    - **Baselines**: per-task ridge regression (the confounded
-     observational estimator) and the latent CATE (Monte-Carlo floor)
+     observational estimator) and the oracle CATE (the achievable floor)
 
 ## The "aha" moment
 
@@ -119,18 +129,41 @@ studies/do-pfn/
 
 ## What this study does *not* show (yet)
 
-- **Real-data benchmarks.** The paper evaluates on IHDP, Twins, and
-  six synthetic case studies; v0.1 here ships only the synthetic
-  reproduction. v0.2 will add the real-data scorers (IHDP first,
-  Twins second).
+- **Real-data benchmarks.** The paper evaluates on the RealCause
+  datasets, an Amazon sales dataset, and a Law School Admissions
+  dataset, alongside six structured synthetic case studies (observed
+  confounder, mediator, unobserved confounder, back-door, front-door,
+  …). v0.1 here ships only the random-DGP synthetic reproduction.
+  v0.2 will add the real-data scorers (RealCause first).
+- **Structured case studies.** The paper hand-builds confounder /
+  mediator / back-door / front-door graphs; v0.1 relies on *random*
+  DAGs where confounding is incidental (a latent node may or may not
+  couple T and Y in any given draw), not deliberately constructed.
+  A consequence: on the 50 random eval tasks a sizeable fraction
+  (~30%) have a **near-zero oracle CATE** — the treatment barely moves
+  the outcome, or its mediators are pinned — so `cate_nmse` is reported
+  over the non-degenerate subset (the scorer surfaces the count in
+  `meta.nmse_cate_tasks`). These tasks aren't *wrong* (model and oracle
+  both →0 and agree), but they dilute the "beats-naive" signal. The
+  structured case studies in v0.2 will give a stronger, non-degenerate
+  test bed.
 - **Paper-scale training.** Upstream pre-trains on millions of DGPs.
   This v0.1 trains on fresh-per-step batches for 12k steps — same
   prior family, less data, faster turnaround. Useful to validate the
   mechanism; not a competitive headline number.
-- **Real-data + paper-scale, as above.** Distributional outputs *are*
-  shipped: the model's `bar_distribution_head` predicts a full outcome
-  distribution over 100 equal-mass buckets (bucketized NLL), and the
-  point estimate used for scoring is the distribution mean.
+- **Total-effect CATE under mediators.** The oracle pins the observed
+  covariates (do(X=x)) before intervening on T, so when a covariate is
+  a descendant of T the indirect path is blocked — a controlled-direct-
+  effect flavour of CATE. Model and oracle share this convention (the
+  model conditions on the same covariate columns), so the comparison is
+  fair, but it is not the paper's total-effect estimand for mediated
+  graphs. See the note atop `priors/do_pfn_scm/prior.py`.
+
+Distributional outputs *are* shipped and now *evaluated*: the
+`bar_distribution_head` predicts a full outcome distribution over 100
+equal-mass buckets (bucketized NLL); the point estimate for MSE is the
+distribution mean, and calibration is measured via **PICP** (90%
+predictive-interval coverage) in the eval.
 
 ## Reproducibility
 

@@ -254,6 +254,149 @@ def _adjacency_from_graph(graph, k: int):
     return adj
 
 
+# ── Monte-Carlo oracle CATE ────────────────────────────────────────────────
+# The training SCM is torch-based with the exogenous noise baked into each
+# equation, so it can't be re-integrated in place. But the oracle
+# E[Y|do(T=high),X] − E[Y|do(T=low),X] only needs the sampled *structure*
+# (graph + linear weights + noise scales), not the specific noise draws — it
+# is an expectation. So we extract the SCM into plain numpy once and Monte-
+# Carlo integrate over fresh noise, pinning the observed covariates per row
+# and forcing the treatment node to its low/high binarized levels.
+#
+# Known limitation (documented, not a bug): covariates are pinned at their
+# observed values, i.e. the conditioning set is treated with do(X=x). When a
+# covariate is a *descendant* of the treatment (a mediator), this blocks the
+# indirect path — exactly the estimand the model is also asked for (it
+# conditions on the same covariate columns), so oracle and model stay
+# consistent, but it is a controlled-direct-effect flavour of CATE, not the
+# total effect. The paper's structured case studies separate these; v0.1 does
+# not. See README "What this study does *not* show (yet)".
+_ORACLE_CLAMP: float = 1.0e6
+
+
+def _apply_nonlinearity(z, gamma_idx: int):
+    if gamma_idx == 0:
+        return z * z
+    if gamma_idx == 1:
+        return np.tanh(z)
+    if gamma_idx == 2:
+        return np.maximum(0.0, z)
+    return z  # identity / unknown
+
+
+def _act_to_gamma_idx(activation) -> int:
+    if activation is torch.square:
+        return 0
+    if activation is torch.tanh:
+        return 1
+    if activation is torch.relu:
+        return 2
+    return 3  # identity
+
+
+def _extract_equations(scm, graph, k: int):
+    """Pull the sampled SCM into a numpy structure indexed by node id 0..k-1.
+
+    Endogenous node → {parents:[int], weights:(n_par,) float64, gamma_idx:int}
+    Exogenous root  → {parents:[], weights:None, gamma_idx:3}
+    """
+    eqs: list[dict | None] = [None] * k
+    for name in graph.nodes:
+        idx = _idx(name)
+        fn = scm.functions.get(name)
+        if fn is None:  # exogenous root — value is pure exo noise
+            eqs[idx] = {"parents": [], "weights": None, "gamma_idx": 3}
+            continue
+        module = fn[0]
+        parent_idxs = [_idx(p) for p in module.parents]
+        weights = (
+            module.layers.weight.detach().cpu().numpy().reshape(-1).astype(np.float64)
+            if module.layers is not None
+            else None
+        )
+        eqs[idx] = {
+            "parents": parent_idxs,
+            "weights": weights,
+            "gamma_idx": _act_to_gamma_idx(module.activation),
+        }
+    if any(e is None for e in eqs):
+        raise RuntimeError("failed to extract every SCM node into numpy")
+    return eqs
+
+
+def _build_oracle_noise(n: int, k: int, equations, sigma_exo: float, sigma_eps: float, rng):
+    """Root (exogenous) nodes ~ N(0, sigma_exo); non-roots ~ N(0, sigma_eps) —
+    matching the torch prior's exogenous vs additive-noise split."""
+    eps = np.empty((n, k), dtype=np.float64)
+    for node in range(k):
+        scale = sigma_exo if not equations[node]["parents"] else sigma_eps
+        eps[:, node] = rng.normal(0.0, scale, size=n)
+    return eps
+
+
+def _oracle_forward(equations, topo_order, eps, overrides):
+    n, k = eps.shape
+    endo = np.zeros((n, k), dtype=np.float64)
+    for node in topo_order:
+        node = int(node)
+        if node in overrides:
+            endo[:, node] = overrides[node]
+            continue
+        eq = equations[node]
+        parents = eq["parents"]
+        if not parents:
+            endo[:, node] = eps[:, node]
+        else:
+            linear = endo[:, parents] @ eq["weights"]
+            endo[:, node] = _apply_nonlinearity(linear, eq["gamma_idx"]) + eps[:, node]
+        np.clip(endo[:, node], -_ORACLE_CLAMP, _ORACLE_CLAMP, out=endo[:, node])
+    return endo
+
+
+def monte_carlo_oracle_cate(
+    *,
+    equations,
+    topo_order,
+    k: int,
+    cov_indices,
+    observed_values,
+    t_idx: int,
+    y_idx: int,
+    t_level_for_one: float,
+    t_level_for_zero: float,
+    sigma_exo: float,
+    sigma_eps: float,
+    n_mc: int,
+    rng,
+):
+    """Per-row CATE by Monte-Carlo integration over the exogenous noise, with
+    observed covariates pinned per row.
+
+    Sign convention MUST match how the scorer queries the model. The model's
+    treatment column is 0/1, and `get_zero_one_treatment` maps the LOW binarized
+    node level (t1) → 1 and the HIGH level (t2) → 0. The scorer computes
+    `pred(col=1) − pred(col=0)`, so the oracle is
+        E[Y | do(T = t_level_for_one), X] − E[Y | do(T = t_level_for_zero), X]
+    with t_level_for_one = t1 (low) and t_level_for_zero = t2 (high). Getting
+    this backwards silently negates every CATE metric — see the sign check in
+    the study's verification notes.
+    """
+    n = observed_values.shape[0]
+    base = {
+        int(node): observed_values[:, i].astype(np.float64)
+        for i, node in enumerate(cov_indices)
+    }
+    one_lvl = np.full(n, float(t_level_for_one), dtype=np.float64)
+    zero_lvl = np.full(n, float(t_level_for_zero), dtype=np.float64)
+    acc_one = np.zeros(n, dtype=np.float64)
+    acc_zero = np.zeros(n, dtype=np.float64)
+    for _ in range(int(n_mc)):
+        eps = _build_oracle_noise(n, k, equations, sigma_exo, sigma_eps, rng)
+        acc_one += _oracle_forward(equations, topo_order, eps, {**base, int(t_idx): one_lvl})[:, y_idx]
+        acc_zero += _oracle_forward(equations, topo_order, eps, {**base, int(t_idx): zero_lvl})[:, y_idx]
+    return ((acc_one - acc_zero) / int(n_mc)).astype(np.float32)
+
+
 class DoPfnBatch:
     def __init__(self, x, y, target_y, x_int, **extra):
         self.x = x
@@ -356,12 +499,25 @@ def sample_do_pfn_torch_batch(
     t_idx = _idx(scm.t_key)
     y_idx = _idx(scm.y_key)
 
+    # Structure extracted for the numpy Monte-Carlo oracle CATE. The two
+    # binarized treatment levels (t_low/t_high) are what the model's 0/1
+    # treatment column maps to in the DGP, so the oracle intervenes with these
+    # rather than literal 0/1.
+    topo_order = np.array([_idx(n) for n in nx.topological_sort(graph)], dtype=np.int64)
+    equations = _extract_equations(scm, graph, k)
+    t_low = float(scm.t1s.reshape(-1)[0].item())
+    t_high = float(scm.t2s.reshape(-1)[0].item())
+
     return DoPfnBatch(
         x=x_obs.detach(),
         y=y_obs.detach(),
         target_y=y_int.detach(),
         x_int=x_int.detach(),
         adjacency=adj,
+        equations=equations,
+        topo_order=topo_order,
+        t_low=t_low,
+        t_high=t_high,
         task_meta={
             "K": k,
             "num_features": int(num_features),
@@ -389,6 +545,7 @@ def sample_do_pfn_studio_task(
     num_unobserved: int = 1,
     K_max: int = 10,
     max_retries: int = 5,
+    oracle_mc: int = 0,
     **params: Any,
 ):
     k = int(num_features + num_unobserved + 2)
@@ -428,17 +585,47 @@ def sample_do_pfn_studio_task(
     y_col[n_ctx:] = np.nan
     x_with_y = np.concatenate([x_full, y_col[:, None]], axis=1).astype(np.float32)
 
-    contrast = (batch.target_y[:, 0, 0] - batch.y[:, 0, 0]).cpu().numpy().astype(np.float32)
-
     meta = dict(batch.task_meta)
     meta["n_ctx"] = n_ctx
-    meta["cate_true_source"] = "paired_interventional_minus_observational"
+
+    if int(oracle_mc) > 0:
+        # Proper ground-truth CATE: E[Y|do(1),X] − E[Y|do(0),X], Monte-Carlo
+        # integrated over the exogenous noise with covariates pinned per row.
+        observed_values = x_full[:, 1:].astype(np.float64)  # covariate cols (N, d)
+        o_rng = np.random.default_rng(int(seed) + 7_654_321)
+        cate_true = monte_carlo_oracle_cate(
+            equations=batch.equations,
+            topo_order=batch.topo_order,
+            k=int(meta["K"]),
+            cov_indices=[int(c) for c in meta["x_indices"]],
+            observed_values=observed_values,
+            t_idx=int(meta["t_idx"]),
+            y_idx=int(meta["y_idx"]),
+            # get_zero_one_treatment maps low node level t1 → column 1, high
+            # level t2 → column 0. Scorer does pred(1)-pred(0), so col-1 level
+            # is t_low (t1) and col-0 level is t_high (t2).
+            t_level_for_one=float(batch.t_low),
+            t_level_for_zero=float(batch.t_high),
+            sigma_exo=float(meta["sigma_exo"]),
+            sigma_eps=float(meta["sigma_eps"]),
+            n_mc=int(oracle_mc),
+            rng=o_rng,
+        )
+        meta["cate_true_source"] = f"monte_carlo_oracle_do1_minus_do0(n_mc={int(oracle_mc)})"
+    else:
+        # Cheap fallback used at train time (the trainer never reads cate_true):
+        # a single-draw interventional-minus-observational contrast. This is
+        # NOT the CATE — request oracle_mc>0 (the eval does) for a real CATE.
+        cate_true = (
+            (batch.target_y[:, 0, 0] - batch.y[:, 0, 0]).cpu().numpy().astype(np.float32)
+        )[:num_samples]
+        meta["cate_true_source"] = "single_draw_interventional_minus_observational"
 
     return {
         "X": x_with_y,
         "y": y_full[n_ctx:].astype(np.float32),
         "n_ctx": n_ctx,
-        "cate_true": contrast[:num_samples].astype(np.float32),
+        "cate_true": np.asarray(cate_true, dtype=np.float32),
         "adjacency": batch.adjacency.astype(np.int8),
         "task_meta": meta,
     }
@@ -456,6 +643,7 @@ class DoPfnSCMPrior(Prior):
         num_unobserved: int = 1,
         K_max: int = 10,
         max_retries: int = 5,
+        oracle_mc: int = 0,
         noise_dist: str = "gaussian",
         exo_dist: str = "gaussian",
         nonlins: str = "paper_text",
@@ -470,6 +658,7 @@ class DoPfnSCMPrior(Prior):
             num_unobserved=num_unobserved,
             K_max=K_max,
             max_retries=max_retries,
+            oracle_mc=oracle_mc,
             noise_dist=noise_dist,
             exo_dist=exo_dist,
             nonlins=nonlins,

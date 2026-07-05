@@ -1,8 +1,8 @@
 id: do_pfn_scm
 name: Do-PFN SCM prior
 version: 0.1.0
-kind: causal_intervention
-description: Random-DAG structural causal model (paper-faithful, Robertson et al. 2025). Samples a fresh sparse DAG per task, picks a treatment node with descendants as the outcome, binarizes treatment, and emits packed (context, query) tokens where context carries observational (X, T_obs, Y_obs) and query carries (X, t_intervention, masked). Training target is the interventional outcome Y under do(T=t_query).
+kind: scm
+description: Random-DAG structural causal model (paper-faithful, Robertson et al. 2025). Samples a fresh DAG per task, picks a treatment node with descendants as the outcome, binarizes treatment, and emits packed (context, query) tokens where context carries observational (X, T_obs, Y_obs) and query carries (X, t_intervention, masked). Training target is the interventional outcome Y under do(T=t_query).
 parameters:
   num_features:
     type: int
@@ -58,15 +58,12 @@ parameters:
       - 6
       - 6
     description: Upper bound when varying feature count per batch.
-  __compatible_task_types__:
-    - cate
-    - regression
 outputs:
   variables:
     - name: X
       type: tensor
       shape: (N, d+2)
-      description: Cols 0..d-1 = covariates, col d = treatment t (0/1), col d+1 = y (real on train rows, NaN on query rows for in-context learning).
+      description: "Col 0 = treatment t (0/1), cols 1..d = covariates, col d+1 = y (real on context rows, NaN on query rows for in-context learning). Layout: [t, x_1..x_d, y]."
     - name: y
       type: tensor
       shape: (N - n_ctx,)
@@ -77,7 +74,7 @@ outputs:
     - name: cate_true
       type: tensor
       shape: (num_samples,)
-      description: Latent CATE for eval (NOT the training target) — the paired interventional-minus-observational contrast. The prior inspector renders this as the headline histogram for causal_intervention priors.
+      description: "Ground-truth CATE for eval (NOT the training target). When sampled with oracle_mc>0 (the eval does), this is the Monte-Carlo oracle E[Y|do(1),X]-E[Y|do(0),X] integrated over the exogenous noise with covariates pinned per row. When oracle_mc=0 (train-time default, where cate_true is unused), it falls back to a single-draw interventional-minus-observational contrast — NOT the CATE. The prior inspector renders this as the headline histogram for causal_intervention priors."
     - name: adjacency
       type: tensor
       shape: (K, K)
