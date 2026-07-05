@@ -66,10 +66,10 @@ random unobserved confounders, learns to *systematically correct for
 that bias* in-context. One forward pass per new dataset; no
 per-instance optimization; no access to the causal graph.
 
-This is closely related to the [`causal-sensitivity-pfn`](../causal-sensitivity-pfn/)
-study (Javurek et al.), but Do-PFN predicts the **full conditional
-interventional distribution** rather than just the bound — CATE falls
-out of paired CID queries on the same X.
+This is closely related to amortized causal-sensitivity work (Javurek et al.),
+but Do-PFN predicts the **full conditional interventional distribution**
+rather than just the bound — CATE falls out of paired CID queries on the
+same X.
 
 ## Result
 
