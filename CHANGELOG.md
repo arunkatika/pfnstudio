@@ -2,6 +2,16 @@
 
 Versions are per-package; tags are `core-v<version>` and `cli-v<version>`.
 
+## pfnstudio-core 0.9.3
+
+### Fixed
+- **Training now uses the GPU.** The trainer resolved no device — model and
+  batch tensors stayed on CPU even on a CUDA box, so a heavy model (12-layer
+  axial transformer) exhausted host RAM instead of training in VRAM. It now
+  resolves `PFNSTUDIO_DEVICE` → CUDA if available → CPU, moves the model there
+  before the optimizer captures params, and moves each batch tensor (X, tag,
+  A, labels, y) onto it. The `setup()` hook gets the resolved device too.
+
 ## pfnstudio-core 0.9.2
 
 ### Fixed

@@ -45,6 +45,10 @@ _EMIT_JSON = os.environ.get("PFNSTUDIO_JSON_PROGRESS") == "1"
 # the name without an extra import path.
 _BATCH_TAG_KEY = "__pfnstudio_batch_tag__"
 
+# The trainer stashes the resolved torch.device here on the hyperparams dict so
+# _default_step can move batch tensors to the same device the model is on.
+_HP_DEVICE_KEY = "__pfnstudio_device__"
+
 
 def _emit(event: str, **fields: Any) -> None:
     """Print one JSON-progress line to stdout, line-buffered, when enabled."""
@@ -171,7 +175,13 @@ def _default_step(model: Any, batch: list[dict], hp: dict) -> Any:
         # project-specific step_fn for novel target shapes.
         return None
 
+    # The trainer stashed its resolved device on hp; move every tensor we
+    # build here onto it so the forward runs on the GPU when there is one.
+    device = hp.get(_HP_DEVICE_KEY) if isinstance(hp, dict) else None
+
     X = torch.stack([torch.from_numpy(b["X"]).float() for b in batch])
+    if device is not None:
+        X = X.to(device)
 
     # Promptable training: if the trainer stashed an encoded tag in
     # the batch (see _BATCH_TAG_KEY at the bottom of this file), turn
@@ -182,6 +192,8 @@ def _default_step(model: Any, batch: list[dict], hp: dict) -> Any:
     tag_np = batch[0].get(_BATCH_TAG_KEY)
     if tag_np is not None:
         tag_tensor = torch.from_numpy(tag_np).float().unsqueeze(0).repeat(len(batch), 1)
+        if device is not None:
+            tag_tensor = tag_tensor.to(device)
     else:
         tag_tensor = None
 
@@ -224,6 +236,8 @@ def _default_step(model: Any, batch: list[dict], hp: dict) -> Any:
 
     if has_A:
         A = torch.stack([torch.from_numpy(b["A"]).float() for b in batch])
+        if device is not None:
+            A = A.to(device)
         # Discovery target is (B, V, V) — pick the head whose trailing
         # dims match. For a wizard brain with a stray scalar_head, the
         # discovery_head's (V, V) output is the right pick.
@@ -237,6 +251,8 @@ def _default_step(model: Any, batch: list[dict], hp: dict) -> Any:
         # scalar_head with d_out=1 produces (B, N, 1) logits which we
         # squeeze to (B, N) before scoring.
         labels = torch.stack([torch.from_numpy(b["labels"]).float() for b in batch])
+        if device is not None:
+            labels = labels.to(device)
         n_ctx_c = sample0.get("n_ctx")
         # Find the first head whose output, after the optional context
         # slice + trailing-1 squeeze, lines up with the labels shape.
@@ -250,6 +266,8 @@ def _default_step(model: Any, batch: list[dict], hp: dict) -> Any:
 
     # Regression branch
     y = torch.stack([torch.from_numpy(b["y"]).float() for b in batch])
+    if device is not None:
+        y = y.to(device)
     n_ctx = sample0.get("n_ctx")
 
     # Generic custom-loss hook. A head that trains with its own objective
@@ -438,6 +456,25 @@ def train_pfn(
                 out.append((attr, v))
         return out
 
+    # Pick the training device BEFORE collecting parameters — moving submodules
+    # after the optimizer captured their tensors would strand its state on the
+    # old device. Resolution: PFNSTUDIO_DEVICE env override → CUDA if available
+    # → CPU. On a GPU box this is what lets a heavy model (e.g. a 12-layer
+    # axial-attention transformer) train in VRAM instead of exhausting host RAM.
+    device_override = os.environ.get("PFNSTUDIO_DEVICE", "").strip()
+    if device_override:
+        device = torch.device(device_override)
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+    for _, _dev_mod in getattr(model, "modules", []):
+        for _sub in _block_nn_modules(_dev_mod):
+            _sub.to(device)
+    _emit("log", line=f"training device: {device}")
+    if isinstance(hp, dict):
+        hp[_HP_DEVICE_KEY] = device
+
     params = []
     for _, mod in getattr(model, "modules", []):
         for sub in _block_nn_modules(mod):
@@ -458,7 +495,7 @@ def train_pfn(
     for _, _setup_mod in getattr(model, "modules", []):
         _setup = getattr(_setup_mod, "setup", None)
         if callable(_setup):
-            _setup(prior=prior, hp=hp, device=None)
+            _setup(prior=prior, hp=hp, device=device)
 
     # Local closure: invoke the adapter's eval callback if one was passed
     # and we're configured to eval periodically. Stays a no-op when
