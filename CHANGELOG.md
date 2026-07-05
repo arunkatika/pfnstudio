@@ -2,6 +2,19 @@
 
 Versions are per-package; tags are `core-v<version>` and `cli-v<version>`.
 
+## pfnstudio 0.8.14
+
+### Added
+- **Runner per-job core sync (opt-in)** — a self-hosted runner can refresh
+  `pfnstudio-core` before each job so it picks up newer core blocks (e.g. the
+  axial-attention library) instead of failing with "No block registered".
+  Enable when launching the runner:
+  - `PFNSTUDIO_RUNNER_SYNC_CORE=1` — `pip install -U --no-deps pfnstudio-core`
+  - `PFNSTUDIO_RUNNER_CORE_SPEC=<spec>` — upgrade an exact spec (pinned version
+    or a git URL) instead.
+  `--no-deps` keeps it fast; a failed sync is non-fatal (the job runs on the
+  installed core).
+
 ## pfnstudio-core 0.9.0
 
 Headline: the **axial-attention block library** and the **scorer registry** are

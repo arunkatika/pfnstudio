@@ -1346,6 +1346,50 @@ def start(
 # ── Job execution ────────────────────────────────────────────────────
 
 
+def _sync_core_if_configured() -> None:
+    """Refresh ``pfnstudio-core`` before running a job, if opted in.
+
+    A self-hosted runner's installed core can lag the version a job's model
+    needs — a model referencing ``grid_preprocessor`` (the axial-attention
+    library, added in core 0.9.0) fails with "No block registered" on an older
+    core. Opt in with either env var, set when you launch the runner:
+
+      PFNSTUDIO_RUNNER_SYNC_CORE=1        # upgrade `pfnstudio-core` from PyPI
+      PFNSTUDIO_RUNNER_CORE_SPEC=<spec>   # upgrade that exact pip spec instead
+                                          # e.g. pfnstudio-core==0.9.0, or a
+                                          # git URL for an unreleased version
+
+    ``--no-deps`` keeps it quick: torch/numpy are already installed on a
+    runner, so only the pure-Python core code is refreshed. A failed sync is
+    logged and non-fatal — the job proceeds on the installed core.
+    """
+    spec = os.environ.get("PFNSTUDIO_RUNNER_CORE_SPEC", "").strip()
+    if not spec and os.environ.get("PFNSTUDIO_RUNNER_SYNC_CORE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        spec = "pfnstudio-core"
+    if not spec:
+        return
+    console.print(f"[dim]runner: syncing {spec} before job…[/dim]")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-U", "--no-deps", spec],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        console.print(f"[dim]runner: {spec} up to date[/dim]")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        console.print(
+            f"[yellow]runner: core sync failed, continuing with the installed "
+            f"core: {str(detail)[-300:]}[/yellow]"
+        )
+
+
 def _materialize_job_workspace(
     base: str,
     headers: dict[str, str],
@@ -1575,6 +1619,12 @@ def _run_job(
                 "trainerPid": None,
             }
         )
+
+        # Optionally refresh pfnstudio-core before the job so a self-hosted
+        # runner picks up newer core blocks (e.g. the axial-attention library)
+        # — otherwise a model referencing a block the installed core lacks
+        # fails with "No block registered under '<type>'".
+        _sync_core_if_configured()
 
         # PFNSTUDIO_JSON_PROGRESS=1 tells the local adapter to emit
         # JSON-line events on stdout, which we pipe up to /events.
