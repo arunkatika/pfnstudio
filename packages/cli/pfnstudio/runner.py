@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import platform
 import shutil
@@ -87,6 +88,27 @@ from rich.table import Table
 from . import __version__
 
 console = Console()
+
+
+def _json_safe(obj: Any) -> Any:
+    """Recursively replace non-finite floats (NaN, +/-Inf) with None.
+
+    JSON has no representation for NaN/Inf, so ``requests`` raises
+    ``InvalidJSONError`` if any slips into a payload — which would
+    discard an ENTIRE run report (events + final metrics) over a single
+    bad metric. A trainer/eval producing NaN is a real signal, so we
+    keep it visible: null renders as "no value" in Studio rather than
+    losing the whole result. Applied at event ingestion so both the live
+    stream and the final result post are safe.
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
 
 # Where the bearer token + cloud URL live. Permissions are 0600 so other
 # users on the same machine can't steal the token.
@@ -638,7 +660,9 @@ def _post_predict_response(
 ) -> None:
     body: dict[str, Any] = {"status": status}
     if payload is not None:
-        body["payload"] = payload
+        # Model outputs are the most likely source of NaN/Inf — scrub so
+        # a non-finite prediction can't fail the whole response post.
+        body["payload"] = _json_safe(payload)
     if error is not None:
         body["error"] = error
     try:
@@ -1699,6 +1723,10 @@ def _run_job(
                     raise ValueError("not an event")
             except (json.JSONDecodeError, ValueError):
                 ev = {"event": "log", "line": line, "ts": _ts()}
+            # Scrub NaN/Inf so a single bad metric can't make the event
+            # (or the final result post that re-sends events_acc) fail to
+            # serialize and lose the whole run report.
+            ev = _json_safe(ev)
             events_acc.append(ev)
 
             # Best-effort stream — don't block the trainer if the cloud
@@ -1800,6 +1828,7 @@ def _run_job(
         }
         if artifact_ref is not None:
             result_body["artifactRef"] = artifact_ref
+        result_body = _json_safe(result_body)
         for attempt in range(2):
             try:
                 requests.post(

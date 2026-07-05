@@ -2,6 +2,19 @@
 
 Versions are per-package; tags are `core-v<version>` and `cli-v<version>`.
 
+## pfnstudio 0.8.15 (CLI)
+
+### Fixed
+- **A NaN/Inf metric no longer discards the whole run report.** When a trainer
+  or eval emitted a non-finite float (e.g. `loss=nan`, a NaN eval metric), the
+  runner's result POST failed with `Out of range float values are not JSON
+  compliant: nan` (`requests` raises `InvalidJSONError`) and the entire run —
+  events *and* final metrics — was lost even though training completed and the
+  checkpoint was saved. Non-finite floats are now scrubbed to `null` (their
+  correct JSON representation) at event ingestion, on the final result post, and
+  on predict responses. The NaN stays visible in Studio as "no value" instead of
+  silently dropping everything.
+
 ## pfnstudio-core 0.9.3
 
 ### Fixed
