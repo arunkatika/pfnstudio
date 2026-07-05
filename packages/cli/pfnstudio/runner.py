@@ -700,6 +700,26 @@ def _pid_alive(pid: int) -> bool:
 # ── Capability reporting ──────────────────────────────────────────────
 
 
+def _core_version() -> str | None:
+    """Installed pfnstudio-core version (the training engine). Drifts
+    independently of this CLI — a runner can be on a current CLI but a
+    stale core (or vice-versa), which is exactly the mismatch that's
+    invisible when only the CLI version is reported. None if not installed."""
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            return version("pfnstudio-core")
+        except PackageNotFoundError:
+            pass
+    except Exception:
+        pass
+    try:
+        import pfnstudio_core  # type: ignore
+        return getattr(pfnstudio_core, "__version__", None)
+    except Exception:
+        return None
+
+
 def _capabilities() -> dict[str, Any]:
     """Self-report what this machine can run. Posted on register + start
     so the cloud's job dispatcher can gate incompatible jobs."""
@@ -707,6 +727,7 @@ def _capabilities() -> dict[str, Any]:
         "osArch": f"{platform.system().lower()}/{platform.machine()}",
         "pythonVersion": platform.python_version(),
         "pfnstudioVersion": __version__,
+        "pfnstudioCoreVersion": _core_version(),
         "hostname": socket.gethostname(),
     }
     # torch is optional at install time (`pip install pfnstudio[torch]`).
@@ -935,12 +956,20 @@ def status() -> None:
         running_v = state_pre.get("pfnstudioVersionAtStart")
         if running_v and running_v != __version__:
             console.print(
-                f"[bold]Version[/bold]         : installed [bold]{__version__}[/bold] · "
+                f"[bold]CLI[/bold]             : installed [bold]{__version__}[/bold] · "
                 f"running [yellow]{running_v}[/yellow] "
                 f"[yellow](restart the loop to pick up {__version__})[/yellow]"
             )
         else:
-            console.print(f"[bold]Version[/bold]         : {__version__}")
+            console.print(f"[bold]CLI[/bold]             : {__version__}")
+        # Core (training engine) + Python — reported so the operator (and
+        # the cloud) can spot a CLI/core drift without guessing.
+        core_v = _core_version()
+        console.print(
+            f"[bold]Core[/bold]            : "
+            + (core_v if core_v else "[yellow]not installed[/yellow] — training will fail")
+        )
+        console.print(f"[bold]Python[/bold]          : {platform.python_version()}")
     else:
         console.print(
             f"[bold]Config[/bold]          : [yellow]{CONFIG_PATH} missing[/yellow] — "
@@ -1033,7 +1062,8 @@ def status() -> None:
         cap_parts.append(f"torch {caps['torchVersion']}")
     if caps.get("cudaAvailable"):
         gpu = caps.get("gpu", "")
-        cap_parts.append(f"cuda True{(' ' + gpu) if gpu else ''}")
+        cv = caps.get("cudaVersion")
+        cap_parts.append(f"cuda {cv or 'True'}{(' ' + gpu) if gpu else ''}")
     else:
         cap_parts.append("cuda False")
     if isinstance(caps.get("diskFreeGb"), (int, float)):

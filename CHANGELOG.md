@@ -2,6 +2,18 @@
 
 Versions are per-package; tags are `core-v<version>` and `cli-v<version>`.
 
+## pfnstudio 0.8.16 (CLI)
+
+### Added
+- **Runner reports and prints its full version set.** `pfnstudio runner status`
+  now shows the CLI version, the **pfnstudio-core** (training engine) version,
+  and Python — not just the CLI. The core version drifts independently of the
+  CLI, so a runner can look current while its training engine is stale; that
+  mismatch was previously invisible. The same versions are added to the
+  capabilities payload the runner posts to the cloud, so Studio can display
+  cli/core/torch/python per runner (and flag a missing core). CUDA toolkit
+  version is now shown in the capabilities line too.
+
 ## pfnstudio 0.8.15 (CLI)
 
 ### Fixed
