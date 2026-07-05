@@ -4,6 +4,13 @@ Versions are per-package; tags are `core-v<version>` and `cli-v<version>`.
 
 ## pfnstudio 0.8.16 (CLI)
 
+### Fixed
+- **`__version__` was a hardcoded literal stuck at 0.8.12.** It was never
+  bumped with `pyproject.toml`, so `pfnstudio runner status` and the
+  capabilities report showed a stale version for several releases (a runner
+  on 0.8.15 reported 0.8.12). `__version__` is now read from the installed
+  distribution metadata, so it can never drift from what pip installed.
+
 ### Added
 - **Runner reports and prints its full version set.** `pfnstudio runner status`
   now shows the CLI version, the **pfnstudio-core** (training engine) version,
