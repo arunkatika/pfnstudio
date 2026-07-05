@@ -191,14 +191,22 @@ def _default_step(model: Any, batch: list[dict], hp: dict) -> Any:
     modules = list(getattr(model, "modules", []))
     encoder, heads = _split_encoder_heads(modules)
 
-    # Run the encoder forward sequentially. Tag-aware blocks (those
-    # with a tag_embedder) receive the tag; everyone else sees only X.
+    # Run the encoder forward sequentially. Tag-aware blocks (those with a
+    # tag_embedder) receive the tag; n_ctx-aware blocks (grid_preprocessor,
+    # axial_attention_block — those declaring ``needs_single_eval_pos``)
+    # receive single_eval_pos, the train/test boundary from the prior's
+    # n_ctx. Some blocks return (out, kv_entry) tuples for KV-cache
+    # compatibility — unwrap the tensor for sequential composition.
+    n_ctx_fwd = int(sample0.get("n_ctx") or 0)
     enc_out = X
     for mod in encoder:
+        kwargs: dict[str, Any] = {}
         if tag_tensor is not None and getattr(mod, "tag_embedder", None) is not None:
-            enc_out = mod(enc_out, tag=tag_tensor)
-        else:
-            enc_out = mod(enc_out)
+            kwargs["tag"] = tag_tensor
+        if n_ctx_fwd > 0 and getattr(mod, "needs_single_eval_pos", False):
+            kwargs["single_eval_pos"] = n_ctx_fwd
+        result = mod(enc_out, **kwargs) if kwargs else mod(enc_out)
+        enc_out = result[0] if isinstance(result, tuple) else result
 
     # Run each head on the encoder output. If there are no head blocks
     # at all (older wizard brains without a skill head), treat the
@@ -242,6 +250,19 @@ def _default_step(model: Any, batch: list[dict], hp: dict) -> Any:
     # Regression branch
     y = torch.stack([torch.from_numpy(b["y"]).float() for b in batch])
     n_ctx = sample0.get("n_ctx")
+
+    # Generic custom-loss hook. A head that trains with its own objective
+    # (e.g. a bar-distribution head's bucketized NLL over per-bucket logits)
+    # exposes loss(query_output, target). It gets its query-span output and
+    # the targets, flattened across the batch (the head reshapes rows
+    # internally). Duck-typed + OPTIONAL: heads without it fall through to MSE.
+    nq = int(n_ctx) if n_ctx is not None else 0
+    for head, ho in zip(heads, head_outputs):
+        _loss = getattr(head, "loss", None)
+        if callable(_loss):
+            q = ho[:, nq:, :]  # (B, n_qry, out_dim)
+            return _loss(q.reshape(-1, q.shape[-1]), y.reshape(-1))
+
     for ho in head_outputs:
         pred = ho[:, int(n_ctx) :, :] if n_ctx is not None else ho
         if pred.dim() == y.dim() + 1 and pred.shape[-1] == 1:
@@ -427,6 +448,16 @@ def train_pfn(
 
     optim = torch.optim.AdamW(params, lr=lr)
     step_fn = step_fn or _default_step
+
+    # Generic pre-training setup hook. A block that must prepare before the
+    # first forward pass — e.g. a bar-distribution head computing bucket
+    # borders from the prior — exposes setup(*, prior, hp, device). Duck-typed
+    # and OPTIONAL: blocks without it are untouched (training on CPU here, so
+    # device is None; the block keeps its tensors on CPU).
+    for _, _setup_mod in getattr(model, "modules", []):
+        _setup = getattr(_setup_mod, "setup", None)
+        if callable(_setup):
+            _setup(prior=prior, hp=hp, device=None)
 
     # Local closure: invoke the adapter's eval callback if one was passed
     # and we're configured to eval periodically. Stays a no-op when

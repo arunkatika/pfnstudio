@@ -2,6 +2,23 @@
 
 Versions are per-package; tags are `core-v<version>` and `cli-v<version>`.
 
+## pfnstudio-core 0.9.1
+
+### Fixed
+- **Trainer support for the axial-attention blocks + distributional heads.**
+  0.9.0 shipped the blocks (`grid_preprocessor`, `axial_attention_block`, …) and
+  a bar-distribution head pattern, but the training/predict loops didn't feed
+  them the plumbing they need, so a study using them failed with
+  "grid_preprocessor requires single_eval_pos > 0". The default step and the
+  predict forward now:
+  - thread **`single_eval_pos`** (the train/test boundary from the prior's
+    `n_ctx`) to blocks declaring `needs_single_eval_pos`, and unwrap
+    `(out, kv)` tuples;
+  - run the generic **`setup(*, prior, hp, device)`** hook before training (so a
+    bar-distribution head fits its bucket borders from the prior);
+  - honor a head's **`loss(query_output, target)`** hook (bucketized NLL)
+    before falling back to MSE.
+
 ## pfnstudio 0.8.14
 
 ### Added

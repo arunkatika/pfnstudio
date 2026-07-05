@@ -591,7 +591,9 @@ def _head_to_prediction(model: Any):
     return None
 
 
-def _forward_full_sequence(model: Any, seq: Any, tag_tensor: Any = None) -> Any:
+def _forward_full_sequence(
+    model: Any, seq: Any, tag_tensor: Any = None, single_eval_pos: int | None = None
+) -> Any:
     """Run the model on a packed sequence, returning the head output.
 
     Mirrors the training-time forward pass: encoder once, then each
@@ -600,7 +602,9 @@ def _forward_full_sequence(model: Any, seq: Any, tag_tensor: Any = None) -> Any:
 
     When ``tag_tensor`` is provided, it's tiled to the input's batch
     size and routed to any encoder block exposing a non-None
-    ``tag_embedder`` attribute — same dispatch as the training loop.
+    ``tag_embedder`` attribute. ``single_eval_pos`` (the context/query
+    boundary) is routed to n_ctx-aware blocks (grid_preprocessor,
+    axial_attention_block) — same dispatch as the training loop.
     """
     from .loop import _split_encoder_heads  # type: ignore
 
@@ -609,10 +613,17 @@ def _forward_full_sequence(model: Any, seq: Any, tag_tensor: Any = None) -> Any:
     batch_tag = _tile_tag_to_batch(tag_tensor, seq)
     enc_out = seq
     for mod in encoder:
+        kwargs: dict[str, Any] = {}
         if batch_tag is not None and getattr(mod, "tag_embedder", None) is not None:
-            enc_out = mod(enc_out, tag=batch_tag)
-        else:
-            enc_out = mod(enc_out)
+            kwargs["tag"] = batch_tag
+        if (
+            single_eval_pos is not None
+            and single_eval_pos > 0
+            and getattr(mod, "needs_single_eval_pos", False)
+        ):
+            kwargs["single_eval_pos"] = single_eval_pos
+        result = mod(enc_out, **kwargs) if kwargs else mod(enc_out)
+        enc_out = result[0] if isinstance(result, tuple) else result
     head_outputs = [head(enc_out) for head in heads] if heads else [enc_out]
     # Single-output regressor/classifier — pick the first head whose
     # trailing dim is 1. Most catalog templates are single-head.
@@ -679,7 +690,9 @@ def _dispatch_inference(
 
         with torch.no_grad():
             inp = torch.from_numpy(seq).float().unsqueeze(0)  # (1, N, F+2)
-            out = _forward_full_sequence(model, inp, tag_tensor=tag_tensor)
+            out = _forward_full_sequence(
+                model, inp, tag_tensor=tag_tensor, single_eval_pos=n_ctx
+            )
             if out is None:
                 raise ValueError(
                     "Model has no head producing a scalar logit per token — expected a scalar_head."
@@ -721,7 +734,9 @@ def _dispatch_inference(
 
         with torch.no_grad():
             inp = torch.from_numpy(seq).float().unsqueeze(0)  # (1, N, F+2)
-            out = _forward_full_sequence(model, inp, tag_tensor=tag_tensor)
+            out = _forward_full_sequence(
+                model, inp, tag_tensor=tag_tensor, single_eval_pos=n_ctx
+            )
             if out is None:
                 raise ValueError(
                     "Model has no head producing scalar predictions — expected a scalar_head."
