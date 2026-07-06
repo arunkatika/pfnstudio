@@ -1,0 +1,30 @@
+id: sanity-v1-msm-bounds-002
+description: null
+prior:
+  slug: causal-sensitivity-msm
+model:
+  slug: causal-sensitivity-msm-bounds-v2
+evals:
+  - slug: causal-sensitivity-bounds-regression-eval
+hyperparams:
+  lr: 0.001
+  seed: 42
+  steps: 50
+  batch_size: 16
+  eval_every: 25
+compute:
+  target: local
+  max_seconds: 3600
+tracking: {}
+results:
+  ts: 2026-06-15T16:59:21.031Z
+  d_in: 10
+  event: done
+  steps: 50
+  status: ok
+  final_loss: 0.2928834557533264
+  wall_time_s: 166.7552435398102
+  checkpoint_dir: /home/ubuntu/anofy/dist/priorstudio-cloud/data/run-workspaces/cmqepzaqv00074gehzjkwbi3a/checkpoint
+  steps_requested: 50
+  mean_loss_last_10pct: 0.2779935896396637
+  mean_loss_first_10pct: 34.65266075134277

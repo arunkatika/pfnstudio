@@ -1,0 +1,23 @@
+id: egret-v1
+description: null
+prior:
+  slug: causal_sensitivity_optimized
+model:
+  slug: causal-sensitivity-optimized-pfn
+evals:
+  - slug: synthetic-regression-sweep
+hyperparams:
+  lr: 0.001
+  seed: 42
+  steps: 50
+  batch_size: 16
+  eval_every: 25
+compute:
+  target: runner
+  runner_id: cmqo2lsek001kqt0r80o15oze
+tracking: {}
+results:
+  event: done
+  steps: 0
+  reason: step_fn returned None
+  status: skipped

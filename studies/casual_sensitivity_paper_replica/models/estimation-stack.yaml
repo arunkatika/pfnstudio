@@ -1,0 +1,25 @@
+id: estimation-stack
+name: Causal Sensitivity MSM Bounds
+version: 0.1.0
+description: Transformer model for predicting MSM lower and higher causal
+  sensitivity bounds from synthetic SCM prior samples.
+input_shape: (B, N, D)
+blocks:
+  - type: tabular_embedder
+    config: {}
+  - type: transformer_encoder
+    config:
+      d_model: 256
+  - type: estimation_head
+    config:
+      d_model: 128
+      num_pairs: 2
+  - type: scalar_head
+    name: estimation_head
+    config:
+      d_model: 256
+      d_out: 1
+output_heads:
+  - name: estimation_head
+    task: regression
+citations: []

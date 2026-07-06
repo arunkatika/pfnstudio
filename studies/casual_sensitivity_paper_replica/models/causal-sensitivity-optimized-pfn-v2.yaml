@@ -1,0 +1,49 @@
+id: causal-sensitivity-optimized-pfn-v2
+name: Causal Sensitivity Optimized PFN v2
+version: 0.1.0
+description: "v2 of the optimized PFN, aligned to the paper's stated task
+  formulation (arXiv:2605.10590, Eq. 6): D_N, x, a, Gamma -> PPD(theta-),
+  PPD(theta+). Unlike v1, both bounds are wired as real output heads (v1 only
+  ever trained the first scalar_head; the second was dead weight). Adds a
+  causal_attention_pool before the heads, matching the canonical
+  tabular-regression recipe. Exact d_model/n_layers/n_heads/dropout are NOT
+  stated in the fetched paper sections (math/setup only, architecture section
+  not reached) - kept at the same values as v1 (d_model=128, n_heads=4,
+  n_layers=10) since those are the only empirically-verified-converging settings
+  we have (sanity-test-v7: loss 140 to 2.19), not because the paper specifies
+  them. Flag for follow-up: confirm exact architecture hyperparams once the
+  paper's Section 6/7 (implementation details) is fetched."
+input_shape: (num_rows, 15)
+blocks:
+  - type: tabular_embedder
+    name: embed
+    config:
+      d_model: 128
+  - type: transformer_encoder
+    name: encoder
+    config:
+      d_model: 128
+      n_heads: 4
+      n_layers: 10
+      dropout: 0.1
+      ff_mult: 4
+  - type: causal_attention_pool
+    name: pool
+    config:
+      d_model: 128
+  - type: scalar_head
+    name: theta_lower
+    config:
+      d_model: 128
+      d_out: 1
+  - type: scalar_head
+    name: theta_upper
+    config:
+      d_model: 128
+      d_out: 1
+output_heads:
+  - name: theta_lower
+    task: regression
+  - name: theta_upper
+    task: regression
+citations: []

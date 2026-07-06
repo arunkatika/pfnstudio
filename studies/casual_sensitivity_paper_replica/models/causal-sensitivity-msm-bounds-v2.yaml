@@ -1,0 +1,29 @@
+id: causal-sensitivity-msm-bounds-v2
+name: Causal Sensitivity MSM Bounds v2
+version: 0.1.0
+description: No blocks, no heads — start from scratch and stack what you need.
+input_shape: null
+blocks:
+  - type: tabular_embedder
+    config:
+      d_model: 256
+  - type: transformer_encoder
+    config:
+      d_model: 256
+      n_heads: 8
+      n_layers: 4
+      dropout: 0.1
+      ff_mult: 4
+  - type: estimation_head
+    config:
+      d_model: 256
+      num_pairs: 2
+  - type: scalar_head
+    name: estimation_head
+    config:
+      d_model: 256
+      d_out: 1
+output_heads:
+  - name: estimation_head
+    task: regression
+citations: []

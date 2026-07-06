@@ -1,0 +1,33 @@
+id: sanity-v1-msm-bounds-010
+description: null
+prior:
+  slug: causal_sensitivity_optimized
+model:
+  slug: causal-sensitivity-optimized-pfn
+evals:
+  - slug: synthetic-regression-sweep
+hyperparams:
+  lr: 0.001
+  seed: 42
+  steps: 50
+  batch_size: 16
+  eval_every: 25
+compute:
+  target: remote
+  remote_host_name: vast-43003491
+  remote_workspace: /workspace
+  vast_instance_id: 43003491
+  remote_ssh_endpoint: root@ssh1.vast.ai:13491
+tracking: {}
+results:
+  ts: 2026-06-29T02:34:46.758Z
+  d_in: 10
+  event: done
+  steps: 50
+  status: ok
+  final_loss: 0.8307918310165405
+  wall_time_s: 14579.9816057682
+  checkpoint_dir: /tmp/pfnstudio-remote-ckpt-0nksym5h
+  steps_requested: 50
+  mean_loss_last_10pct: 0.9596160054206848
+  mean_loss_first_10pct: 80.6029501914978

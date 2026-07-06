@@ -1,0 +1,37 @@
+id: causal-sensitivity-bounds-v3
+name: Causal Sensitivity Bounds v3
+version: 0.1.0
+task: estimation
+description: "Evaluates a two-headed bounds model (theta_lower, theta_upper) —
+  e.g. causal-sensitivity-optimized-pfn-v2 — against fresh draws from
+  causal_sensitivity_packed. Unlike v2 (which only had metric names, no scorer,
+  and assumed a single scalar output), v3 ships a real scorer that: (1) splits
+  query rows by the prior's bound_type diagnostic column into lower/upper
+  subsets, (2) runs the model's two output heads separately, (3) reports
+  per-bound RMSE plus a non-crossing coverage rate and interval-width error,
+  since a sensitivity-bounds model that predicts crossed intervals (lower >
+  upper) is failing at its actual job even if pointwise RMSE looks fine."
+dataset:
+  name: synthetic_causal_sensitivity_packed
+  split: test
+  source: priors/causal_sensitivity_packed
+  version: 0.1.0
+metrics:
+  - name: lower_rmse
+    description: RMSE of predicted theta_lower vs the prior's Lagrangian lower-bound
+      labels (bound_type=1 query rows).
+    higher_is_better: false
+  - name: upper_rmse
+    description: RMSE of predicted theta_upper vs the prior's Lagrangian upper-bound
+      labels (bound_type=0 query rows).
+    higher_is_better: false
+  - name: coverage
+    description: Fraction of query rows where predicted theta_lower <= theta_upper
+      (valid, non-crossing interval).
+    higher_is_better: true
+  - name: interval_width_mae
+    description: Mean absolute error between predicted (theta_upper - theta_lower)
+      width and the ground-truth bound width.
+    higher_is_better: false
+baselines: []
+citations: []
