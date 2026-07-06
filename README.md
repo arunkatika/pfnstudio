@@ -28,7 +28,7 @@ synthetic data generator           ↓
 
 **[`schemas/`](schemas/)** — JSON Schema for every artifact type (`prior.yaml`, `model.yaml`, `eval.yaml`, `run.yaml`, `initiative.md`).
 
-**[`templates/fm-project/`](templates/fm-project/)** — a cookiecutter-style starter project.
+**[`starters/fm-project/`](starters/fm-project/)** — the starter project scaffold that `pfnstudio init` copies to create a new project.
 
 **[`examples/`](examples/)** — end-to-end scripts and notebooks. `01_linear_regression.py` trains a small PFN on the Bayesian linear regression prior in <10 minutes on CPU and verifies that the model matches the closed-form posterior mean.
 
@@ -95,7 +95,7 @@ Every prior is a forkable starting point. Open one, change a sampling distributi
 
 ---
 
-## Paper-replication templates (work in progress)
+## Paper-replication studies (work in progress)
 
 We've scaffolded several published PFN papers as PFN Studio projects. The studio's marketplace surfaces them as "Importable" projects:
 
@@ -188,7 +188,7 @@ Good first contributions:
 
 And, if PFN Studio specifically was useful, a link to this repo is the most helpful citation we could ask for.
 
-[NOTICE](NOTICE) lists upstream OSS projects that this repo's templates and scorers were derived from, with their licenses and citations.
+[NOTICE](NOTICE) lists upstream OSS projects that this repo's starters, studies, and scorers were derived from, with their licenses and citations.
 
 ---
 
