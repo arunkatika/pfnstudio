@@ -1,7 +1,7 @@
 id: cid_recovery
 name: CID + CATE recovery — Do-PFN vs naive vs oracle
 version: 0.1.0
-task: estimation
+task: cate
 description: 50 fresh DGPs from the same prior. Scores interventional outcome prediction (CID-MSE, range-normalized CID-NMSE) and derived CATE (paired do(0)/do(1) queries) against the SCM's ground-truth Y_int and a Monte-Carlo oracle CATE E[Y|do(1),X]-E[Y|do(0),X]. Also reports PICP (90% predictive-interval coverage) for the bar head's uncertainty. Compared to a per-task ridge baseline (biased under confounding) and the oracle floor.
 dataset:
   name: synthetic_fresh_prior_draws
