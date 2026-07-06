@@ -1,0 +1,20 @@
+id: causal-sensitivity-bounds-theta-rmse
+name: Causal Sensitivity Bounds (theta* RMSE)
+version: 0.1.0
+task: regression
+description: MSM causal-sensitivity bounds eval. Draws fresh SCM tasks from the
+  causal_sensitivity_optimized prior and scores predicted theta* against the
+  prior's Lagrangian frontier labels via RMSE/MAE (point-error, comparable to
+  the paper's reported bound RMSE). No baselines; the meaningful comparison is
+  the analytical MSM oracle, added later via a custom scorer.
+dataset:
+  name: synthetic_causal_sensitivity_optimized
+  split: test
+  source: priors/causal_sensitivity_optimized
+  version: 0.1.0
+metrics:
+  - name: rmse
+  - name: mae
+  - name: r2
+baselines: []
+citations: []

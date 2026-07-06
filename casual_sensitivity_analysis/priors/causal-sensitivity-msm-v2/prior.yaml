@@ -1,0 +1,51 @@
+id: causal-sensitivity-msm-v2
+name: Causal Sensitivity MSM V2
+version: 0.1.0
+kind: scm
+description: Studio-compatible packed MSM prior for causal sensitivity analysis.
+  Internally simulates an SCM with hidden confounder U, observed X/T/output,
+  query rows, gamma values, and MSM lower/upper bounds, then returns packed X,
+  y, and n_ctx for PFN Studio regression training
+parameters:
+  d:
+    type: int
+    range:
+      - 3
+      - 10
+  gamma_max:
+    type: float
+    range:
+      - 1
+      - 10
+  num_gamma:
+    type: int
+    range:
+      - 2
+      - 50
+  mc_samples:
+    type: int
+    range:
+      - 64
+      - 8192
+  num_points:
+    type: int
+    range:
+      - 64
+      - 1024
+  num_query_points:
+    type: int
+    range:
+      - 1
+      - 32
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: (num_points + m, d + 5)
+    - name: y
+      type: tensor
+      shape: (m,)
+    - name: n_ctx
+      type: scalar
+citations: []
+implementation: prior.py

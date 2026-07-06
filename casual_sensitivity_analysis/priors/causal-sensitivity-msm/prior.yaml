@@ -1,0 +1,72 @@
+id: causal-sensitivity-msm
+name: Causal Sensitivity MSM
+version: 0.1.0
+kind: scm
+description: Synthetic SCM prior for causal sensitivity analysis. Each sample
+  generates observed covariates X, binary treatment T, scalar output, query
+  rows, sensitivity levels gamma, and lower/upper sensitivity-bound labels.
+parameters:
+  d:
+    type: int
+    range:
+      - 3
+      - 10
+    description: no. of columns, x0, x1...x9
+  gamma_max:
+    type: float
+    range:
+      - 1
+      - 10
+    description: "range of each gamma "
+  num_gamma:
+    type: int
+    range:
+      - 2
+      - 50
+    description: "2, num of gammas. "
+  mc_samples:
+    type: int
+    range:
+      - 256
+      - 8192
+    description: number of hidden variables U, u1, u2..un
+  num_points:
+    type: int
+    range:
+      - 64
+      - 1024
+    description: total rows of X
+  num_query_points:
+    type: int
+    range:
+      - 1
+      - 32
+    description: how many x's we are selecting to find answers
+outputs:
+  variables:
+    - name: X
+      type: tensor
+      shape: (num_points, d)
+    - name: T
+      type: tensor
+      shape: (num_points, 1)
+    - name: output
+      type: tensor
+      shape: (num_points, 1)
+    - name: x_query
+      type: tensor
+      shape: (m, d)
+    - name: t_query
+      type: tensor
+      shape: (m, 1)
+    - name: gamma
+      type: tensor
+      shape: (m, 1)
+    - name: lower_bound
+      type: tensor
+      shape: (m, 1)
+    - name: higher_bound
+      type: tensor
+      shape: (m, 1)
+citations: []
+implementation: prior.py

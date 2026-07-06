@@ -1,0 +1,24 @@
+id: synthetic-regression-sweep
+name: Synthetic regression sweep
+version: 0.1.0
+task: regression
+description: Linear synthetic regression. Quick sanity test that a prior + model
+  can fit a known signal.
+dataset:
+  kind: synthetic
+  seed: 42
+  task: regression
+  noise: 0.1
+  n_samples: 1000
+  n_features: 10
+  name: synthetic-regression-sweep
+metrics:
+  - name: rmse
+  - name: r2
+  - name: mae
+baselines:
+  - name: ols
+  - name: ridge
+    config:
+      alpha: 1
+citations: []

@@ -1,0 +1,1 @@
+This prior generates synthetic SCM tasks for causal sensitivity analysis. Each sample creates observed covariates X, binary treatment T, scalar output, query rows, sensitivity levels gamma, and MSM lower/upper bound labels. The hidden confounder U is simulated internally but not returned, matching the partial-identification setting.

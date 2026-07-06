@@ -1,0 +1,79 @@
+id: causal_sensitivity_optimized
+name: causal_sensitivity_optimized
+version: 0.1.0
+kind: scm
+description: Optimization-based causal sensitivity prior matching the authors
+  pipeline. It samples synthetic SCM datasets with observed covariates X, binary
+  treatment A, outcome Y, query rows (x, a, Γ), and Lagrangian frontier labels
+  θ* with bound_type for upper and lower sensitivity bounds.
+parameters:
+  D:
+    type: int
+    range:
+      - 10
+      - 10
+    description: number of features per row
+  N:
+    type: int
+    range:
+      - 256
+      - 256
+    description: number of observed context rows
+  n_lambda:
+    type: int
+    range:
+      - 8
+      - 8
+    description: number of gamma points per bound, per query
+  n_queries:
+    type: int
+    range:
+      - 8
+      - 8
+    description: number of query points
+outputs:
+  variables:
+    - name: X
+      type: matrix
+      shape: (N, D)
+      description: observed context features
+    - name: a_context
+      type: matrix
+      shape: (N, 1)
+      description: observed treatment for each context row (0 or 1)
+    - name: y_context
+      type: matrix
+      shape: (N, 1)
+      description: observed outcome for each context row
+    - name: x_query
+      type: matrix
+      shape: (M, D)
+      description: query features (copied from a context row)
+    - name: a_query
+      type: matrix
+      shape: (M, 1)
+      description: treatment arm asked about in each query (0 or 1)
+    - name: gamma
+      type: matrix
+      shape: (M, 1)
+      description: confounding level allowed for that query
+    - name: theta_star
+      type: matrix
+      shape: (M, 1)
+      description: the bound value (this is the label)
+    - name: bound_type
+      type: matrix
+      shape: (M, 1)
+      description: upper bound (0) or lower bound (1)
+    - name: query_id
+      type: matrix
+      shape: (M, 1)
+      description: which query each row belongs to
+    - name: source_row_index
+      type: matrix
+      shape: (M, 1)
+      description: which context row the query was copied from
+citations:
+  - javurek2026csa
+  - mueller2022pfn
+implementation: prior.py
